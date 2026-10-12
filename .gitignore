@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+
+# Datos: no se versionan, se descargan/generan con el ETL
+data/raw/*
+!data/raw/.gitkeep
+!data/raw/cicids2017/.gitkeep
+!data/raw/cti_reports/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/reports/*
+!data/reports/.gitkeep
+data/figures/*
+!data/figures/.gitkeep
+data/blockchain/*
+!data/blockchain/.gitkeep
+
+# Modelos y artefactos generados
+models/*
+!models/.gitkeep
+logs/*
+!logs/.gitkeep
+
+# Proyecto guia (solo referencia local, no forma parte de este proyecto)
+Proyecto_BigData/
+
+# Secretos / entornos
+.env
+*.db
+*.sqlite
+
+# Sistema operativo
+Thumbs.db
+.DS_Store

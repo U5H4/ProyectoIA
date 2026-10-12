@@ -1,0 +1,22 @@
+# ETL / datos
+pandas>=2.0
+numpy>=1.24
+pyarrow>=14.0
+
+# Machine Learning
+scikit-learn>=1.3
+joblib>=1.3
+
+# Descarga de datos
+requests>=2.31
+tqdm>=4.66
+
+# PNL
+vaderSentiment>=3.3
+
+# Visualizacion / dashboard
+streamlit>=1.30
+plotly>=5.18
+
+# Pruebas
+pytest>=7.4
