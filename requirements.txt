@@ -14,8 +14,8 @@ tqdm>=4.66
 # PNL
 vaderSentiment>=3.3
 
-# Visualizacion / dashboard
-streamlit>=1.30
+# Visualizacion / dashboard (width="stretch" requiere Streamlit >= 1.49)
+streamlit>=1.50
 plotly>=5.18
 
 # Pruebas

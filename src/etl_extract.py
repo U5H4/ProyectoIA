@@ -36,6 +36,7 @@ from config import (
     DEFAULT_PER_FILE_CLASS_CAP,
     RAW_LABEL_COLUMN,
     REPORTS,
+    SEED,
 )
 from utils import LOG, asegurar_dir, titulo
 
@@ -226,11 +227,18 @@ def perfilar_parquet(path, fuente: str) -> tuple[pd.DataFrame, ResumenFuente]:
 # Extraccion
 # --------------------------------------------------------------------------
 def _muestreo_por_archivo(frame: pd.DataFrame, cap: int) -> pd.DataFrame:
-    """Conserva hasta `cap` filas por etiqueta cruda (protege clases raras)."""
+    """Conserva hasta `cap` filas por etiqueta cruda (protege clases raras).
+
+    El muestreo es aleatorio (no `.head`) para evitar que cada clase quede
+    concentrada en un solo dia/archivo, lo que sesgaria el modelo.
+    """
     if RAW_LABEL_COLUMN not in frame.columns:
         return frame
     etiqueta = frame[RAW_LABEL_COLUMN].astype(str).str.strip()
-    partes = [grupo.head(cap) for _, grupo in frame.groupby(etiqueta, sort=False)]
+    partes = [
+        grupo.sample(n=min(len(grupo), cap), random_state=SEED)
+        for _, grupo in frame.groupby(etiqueta, sort=False)
+    ]
     return pd.concat(partes, ignore_index=True)
 
 

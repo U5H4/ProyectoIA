@@ -30,7 +30,7 @@ logs/*
 !logs/.gitkeep
 
 # Proyecto guia (solo referencia local, no forma parte de este proyecto)
-Proyecto_BigData/
+ProyectoIA_backup/
 
 # Secretos / entornos
 .env

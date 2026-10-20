@@ -13,6 +13,8 @@ Uso:
 from __future__ import annotations
 
 import hashlib
+import io
+import json
 import sys
 from pathlib import Path
 
@@ -23,7 +25,9 @@ import streamlit as st
 RAIZ = Path(__file__).resolve().parent
 sys.path.insert(0, str(RAIZ))
 
+from blockchain import Cadena  # noqa: E402
 from config import BLOCKCHAIN_JSON, FIGURES, MODELS, PROCESSED, REPORTS  # noqa: E402
+from ml import cargar_predictor, predecir  # noqa: E402
 
 st.set_page_config(page_title="Sistema Inteligente de Ciberseguridad", layout="wide")
 
@@ -47,6 +51,17 @@ def leer_csv(ruta: str):
 def leer_texto(ruta: str) -> str:
     p = Path(ruta)
     return p.read_text(encoding="utf-8") if p.exists() else ""
+
+
+@st.cache_data(show_spinner=False)
+def leer_json(ruta: str):
+    p = Path(ruta)
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
 def falta(*rutas) -> bool:
@@ -79,11 +94,18 @@ with tabs[0]:
     c4.metric("Bloques en la cadena", f"{0 if bloques is None else len(bloques):,}")
 
     if metricas is not None and not metricas.empty:
-        mejor = metricas.sort_values("f1_macro", ascending=False).iloc[0]
+        mejor = metricas.sort_values("cv_f1_macro", ascending=False).iloc[0]
         st.success(
             f"Modelo ganador: **{mejor['modelo']}**  |  "
-            f"accuracy = {mejor['accuracy']:.3f}  |  F1-macro = {mejor['f1_macro']:.3f}"
+            f"accuracy = {mejor['accuracy']:.3f}  |  F1-macro = {mejor['f1_macro']:.3f}  |  "
+            f"CV F1-macro = {mejor['cv_f1_macro']:.3f}"
         )
+
+    integrado = leer_json(str(REPORTS / "reporte_integrado.json"))
+    if integrado:
+        nivel = integrado.get("nivel_riesgo", "N/D")
+        color = {"ALTO": "🔴", "MEDIO": "🟠", "BAJO": "🟢"}.get(nivel, "⚪")
+        st.info(f"Nivel de riesgo global (ML + PNL): {color} **{nivel}**")
 
     st.subheader("Arquitectura del sistema")
     st.code(
@@ -108,6 +130,11 @@ with tabs[0]:
         "     DASHBOARD",
         language="text",
     )
+
+    reporte_integrado = leer_texto(str(REPORTS / "reporte_integrado.md"))
+    if reporte_integrado:
+        with st.expander("Reporte integrado ML + PNL (nivel de riesgo)"):
+            st.markdown(reporte_integrado)
 
 
 # --------------------------------------------------------------------------
@@ -186,6 +213,37 @@ with tabs[2]:
         aciertos = pred["acierto"].mean() * 100
         st.caption(f"Aciertos sobre {len(pred):,} registros: {aciertos:.2f}%")
 
+    st.subheader("Prediccion en vivo (inferencia)")
+    st.caption(
+        "Sube un CSV con flujos de red crudos (mismas columnas que CICIDS2017, sin escalar). "
+        "El sistema aplica la estandarizacion guardada y el modelo ganador."
+    )
+    archivo_flujos = st.file_uploader("CSV de flujos a clasificar", type=["csv"], key="ml_inferencia")
+    if archivo_flujos is not None:
+        try:
+            crudo = pd.read_csv(io.BytesIO(archivo_flujos.getvalue()))
+            predictor = cargar_predictor()
+            resultado = predecir(crudo, predictor)
+            st.success(
+                f"Predicciones generadas con **{predictor['modelo_nombre']}** sobre "
+                f"{len(resultado):,} flujos."
+            )
+            resumen = (
+                resultado["label_predicho"].value_counts().rename_axis("clase").reset_index(name="flujos")
+            )
+            st.plotly_chart(
+                px.bar(resumen, x="clase", y="flujos", color="clase",
+                       title="Distribucion de clases predichas"),
+                width="stretch",
+            )
+            st.dataframe(resultado[["label_predicho"]].head(50), width="stretch")
+        except FileNotFoundError:
+            st.warning("Falta `models/predictor.joblib`. Ejecuta `python src/run_all.py --sin-descargar --solo etl ml`.")
+        except KeyError as exc:
+            st.error(f"El CSV no tiene el formato esperado: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"No se pudo procesar el CSV: {exc}")
+
 
 # --------------------------------------------------------------------------
 # PNL
@@ -233,12 +291,24 @@ with tabs[3]:
 with tabs[4]:
     st.subheader("Estado de la cadena")
     bloques = leer_csv(str(REPORTS / "blockchain_bloques.csv"))
-    validacion = leer_csv(str(REPORTS / "blockchain_validacion.csv"))
+    veredicto = None
+    if BLOCKCHAIN_JSON.exists():
+        try:
+            _cadena = Cadena.cargar()
+            _ok, _errores = _cadena.es_valida()
+            veredicto = (_ok, _errores, len(_cadena.bloques))
+        except Exception as exc:  # noqa: BLE001
+            veredicto = (False, [f"No se pudo leer {BLOCKCHAIN_JSON.name}: {exc}"], 0)
+
     if bloques is not None:
-        if validacion is not None and bool(validacion.iloc[0]["cadena_valida"]):
-            st.success(f"Cadena valida: {len(bloques)} bloques, sin alteraciones.")
+        if veredicto is not None:
+            _ok, _errores, _n = veredicto
+            if _ok:
+                st.success(f"Cadena valida: {_n} bloques, sin alteraciones (verificado en vivo desde {BLOCKCHAIN_JSON.name}).")
+            else:
+                st.error("La cadena NO es valida. Errores: " + "; ".join(_errores))
         else:
-            st.error("La cadena reporta errores de integridad.")
+            st.warning(f"No existe {BLOCKCHAIN_JSON.name}: se muestra el ultimo reporte guardado.")
         st.dataframe(bloques, width="stretch")
     else:
         falta(REPORTS / "blockchain_bloques.csv")

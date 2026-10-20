@@ -26,17 +26,17 @@ def capturar(monkeypatch):
 
 def test_default_ejecuta_etapas_obligatorias(capturar):
     run_all.main([])
-    assert capturar["claves"] == ["descargar", "etl", "ml", "pnl", "blockchain"]
+    assert capturar["claves"] == ["descargar", "etl", "ml", "pnl", "integrar", "blockchain"]
 
 
 def test_sin_descargar(capturar):
     run_all.main(["--sin-descargar"])
-    assert capturar["claves"] == ["etl", "ml", "pnl", "blockchain"]
+    assert capturar["claves"] == ["etl", "ml", "pnl", "integrar", "blockchain"]
 
 
 def test_con_tests_anade_al_final(capturar):
     run_all.main(["--con-tests"])
-    assert capturar["claves"] == ["descargar", "etl", "ml", "pnl", "blockchain", "tests"]
+    assert capturar["claves"] == ["descargar", "etl", "ml", "pnl", "integrar", "blockchain", "tests"]
 
 
 def test_solo_respeta_orden_del_pipeline(capturar):

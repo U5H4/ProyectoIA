@@ -18,6 +18,11 @@ Prototipo funcional (Tema 3) que analiza incidentes de ciberseguridad combinando
 | Blockchain | Listo |
 | Dashboard | Listo |
 
+> Las cifras concretas (registros procesados, F1-macro del modelo ganador, numero
+> de bloques y estado de la cadena) se generan al ejecutar el pipeline y quedan en
+> `data/reports/` (`validacion_minimos.csv`, `metricas_modelos.csv`,
+> `ml_resumen.json`, `blockchain_validacion.csv`).
+
 ## Requisitos
 
 - Python 3.10+ (probado con 3.12)
@@ -36,7 +41,7 @@ pip install -r requirements.txt
 
 ```powershell
 # Descarga los datos crudos y ejecuta el pipeline completo
-# (descargar -> etl -> ml -> pnl -> blockchain)
+# (descargar -> etl -> ml -> pnl -> integrar -> blockchain)
 python src/run_all.py
 
 # Si ya descargaste los datos, omite la descarga
@@ -125,11 +130,23 @@ python src/ml.py
 - Modelos: Regresion Logistica, Arbol de Decision, Random Forest, KNN,
   Naive Bayes (Gaussiano) y SVM (RBF).
 - Division estratificada 70/30 (train/test) y validacion cruzada estratificada
-  (`CV_FOLDS=5`) para elegir el modelo.
+  (`CV_FOLDS=5`); el modelo ganador se elige por la media de F1-macro en la
+  validacion cruzada (no mirando el test, para no sesgar la seleccion).
 - Salidas: `models/modelo_mejor.joblib`, `data/processed/predicciones_test.parquet`
   y evidencia en `data/reports/` (`metricas_modelos.csv`, `metricas_por_clase.csv`,
   `matriz_confusion.csv`, `importancia_variables.csv`, `ml_resumen.json`).
 - Graficos: `data/figures/comparacion_modelos.html`, `data/figures/matriz_confusion.html`.
+- **Inferencia:** `models/predictor.joblib` empaqueta el modelo ganador y la
+  estandarizacion (de `estandarizacion.json`); el dashboard permite subir un CSV
+  de flujos crudos y clasificarlos en vivo.
+- **Hiperparametros:** el ganador se reajusta con `GridSearchCV` (F1-macro, CV=5).
+
+## Reporte integrado (ML + PNL)
+
+`python src/integrar.py` combina la clasificacion de flujos y el analisis de
+reportes en un unico resultado con **nivel de riesgo global** (BAJO/MEDIO/ALTO),
+que es el artefacto integrado que se registra en la Blockchain
+(`data/reports/reporte_integrado.{md,json}`).
 
 ## PNL
 
@@ -155,22 +172,28 @@ Cadena propia (SHA-256) que registra la huella de los resultados clave y permite
 verificar su integridad.
 
 ```powershell
-python src/blockchain.py
+python src/blockchain.py                  # registra y verifica
+python src/blockchain.py --solo-verificar # valida la cadena existente sin reconstruirla
 ```
 
 - Se registra el SHA-256 de: dataset procesado, reportes enriquecidos, modelo,
-  metricas y reporte de PNL. Se justifica por que esos artefactos permiten
-  demostrar que el resultado presentado no fue alterado.
+  predictor de inferencia, metricas ML, reporte de PNL y **reporte integrado ML+PNL**.
+  Se justifica por que esos artefactos permiten demostrar que el resultado
+  presentado no fue alterado.
 - Verificacion: recomputa cada hash y la cadena completa; prueba de alteracion
-  incluida.
+  incluida. Antes de reconstruir, la cadena previa en disco se valida y se avisa
+  si ya no era integra.
+- El **dashboard verifica la cadena en vivo** (recalcula `es_valida()` sobre
+  `cadena.json`), no solo lee un CSV previo.
 - Salidas: `data/blockchain/cadena.json` y evidencia en
   `data/reports/blockchain_{bloques,validacion,integridad,prueba_alteracion}.csv`.
 
 ## Dashboard
 
 Presenta registros analizados, categorias, resultados del modelo, indicadores,
-graficas, resultados del analisis de texto, entidades, predicciones y la
-verificacion de la Blockchain.
+graficas, resultados del analisis de texto, entidades, **prediccion en vivo**
+(subir CSV de flujos), nivel de riesgo integrado y la verificacion de la
+Blockchain.
 
 ```powershell
 streamlit run src/dashboard.py
@@ -207,6 +230,7 @@ proyectoIA/
 │   ├── etl_load.py     LOAD: datos procesados, perfiles y validacion
 │   ├── ml.py           ML: entrenamiento, evaluacion y prediccion
 │   ├── pnl.py          PNL: representacion, sentimiento, entidades y resumen
+│   ├── integrar.py     Reporte integrado ML+PNL (nivel de riesgo)
 │   ├── blockchain.py   Blockchain: registro y verificacion de integridad
 │   ├── dashboard.py    Dashboard interactivo (Streamlit)
 │   └── run_all.py      Orquestador del pipeline

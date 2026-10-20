@@ -126,13 +126,6 @@ def numero(valor, dec: int = 0) -> str:
         return "N/A"
 
 
-def money(valor) -> str:
-    try:
-        return f"${float(valor):,.2f}"
-    except (TypeError, ValueError):
-        return "N/A"
-
-
 def tabla(df: pd.DataFrame, decimales: int = 2) -> str:
     if df is None or df.empty:
         return "  (sin datos)"

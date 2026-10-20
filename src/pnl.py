@@ -158,16 +158,60 @@ def sentimiento(texto: str, analizador=None) -> tuple[float, str]:
 # 3. Reconocimiento de entidades (IOCs)
 # --------------------------------------------------------------------------
 def _ip_valida(ip: str) -> bool:
-    return all(0 <= int(o) <= 255 for o in ip.split("."))
+    """IPv4 valida: 4 octetos 0-255 y sin ceros a la izquierda (rechaza '10.2.3.4'
+    que en realidad es una version tipo '10.2.3.4'? No: esa ES una IPv4 valida.
+
+    Lo que se rechaza es algo como '1.2.3.4.5' (ya cubierto por el patron) y los
+    rangos fuera de 0-255. Ademas se exige que no haya octetos con ceros a la
+    izquierda (evita confundir fechas/timestamps tipo '2026.10.1.0' parciales).
+    """
+    partes = ip.split(".")
+    if len(partes) != 4:
+        return False
+    for parte in partes:
+        if not parte.isdigit() or not (0 <= int(parte) <= 255):
+            return False
+        if len(parte) > 1 and parte[0] == "0":
+            return False
+    return True
+
+
+def _es_versionish(ip: str) -> bool:
+    """Heuristica: descarta cadenas que parecen versiones de software.
+
+    Una version suele tener numeros pequenos (0-20) en los ultimos octetos y un
+    primer octeto pequeno (<10). Ej: 1.2.3.4, 2.0.1.5. Se descarta solo si
+    TODOS los octetos son <= 20 (poco probable en una IP real en uso).
+    """
+    try:
+        partes = [int(p) for p in ip.split(".")]
+    except ValueError:
+        return False
+    return all(p <= 20 for p in partes)
+
+
+def _limpiar_ipv4(ips: list[str]) -> list[str]:
+    return [ip for ip in ips if _ip_valida(ip) and not _es_versionish(ip)]
 
 
 def extraer_iocs(texto: str) -> dict[str, list[str]]:
-    hallazgos: dict[str, list[str]] = {}
-    for tipo, patron in PATRONES.items():
-        encontrados = patron.findall(texto)
+    """Extrae IOCs evitando solapamientos entre patrones.
+
+    Un dominio que forma parte de una URL o de un correo NO se cuenta tambien
+    como dominio suelto: el orden de extraccion garantiza exclusion mutua.
+    """
+    hallazgos: dict[str, list[str]] = {tipo: [] for tipo in PATRONES}
+    restante = texto
+
+    for tipo in ("url", "email", "ipv4", "md5", "sha1", "sha256", "cve", "dominio"):
+        patron = PATRONES[tipo]
+        encontrados = patron.findall(restante)
         if tipo == "ipv4":
-            encontrados = [ip for ip in encontrados if _ip_valida(ip)]
+            encontrados = _limpiar_ipv4(encontrados)
         hallazgos[tipo] = encontrados
+        for valor in encontrados:
+            restante = restante.replace(valor, " ")
+
     return hallazgos
 
 
@@ -268,12 +312,13 @@ def analizar(reportes: pd.DataFrame | None = None) -> dict:
     dist_sent["porcentaje"] = (dist_sent["documentos"] / len(enriquecido) * 100).round(2)
 
     iocs_largos = []
-    for tipo, patron in PATRONES.items():
-        contador = Counter()
+    contadores: dict[str, Counter] = {}
+    for tipo in ("url", "email", "ipv4", "md5", "sha1", "sha256", "cve", "dominio"):
+        contador: Counter = Counter()
         for texto in textos:
-            for valor in patron.findall(texto):
-                if tipo != "ipv4" or _ip_valida(valor):
-                    contador[valor.lower()] += 1
+            for valor in extraer_iocs(texto).get(tipo, []):
+                contador[valor.lower()] += 1
+        contadores[tipo] = contador
         for valor, freq in contador.most_common(10):
             iocs_largos.append({"tipo": tipo, "valor": valor, "frecuencia": freq})
     iocs_df = pd.DataFrame(iocs_largos)
@@ -284,8 +329,9 @@ def analizar(reportes: pd.DataFrame | None = None) -> dict:
             ("Sentimiento promedio", round(float(enriquecido["sentimiento_compound"].mean()), 4), "VADER compound"),
             ("% negativo", f"{(enriquecido['sentimiento'] == 'negativo').mean() * 100:.1f}%", "tono de amenaza"),
             ("Total de IOCs", int(entidades[["ipv4", "dominio", "url", "hash", "cve", "email"]].to_numpy().sum()), "entidades detectadas"),
-            ("CVE distintos", int(iocs_df.loc[iocs_df["tipo"] == "cve", "valor"].nunique()), "codigos de vulnerabilidad"),
-            ("Dominios distintos", int(iocs_df.loc[iocs_df["tipo"] == "dominio", "valor"].nunique()), "en el top detectado"),
+            ("CVE distintos", int(len(contadores["cve"])), "codigos de vulnerabilidad (todos)"),
+            ("Dominios distintos", int(len(contadores["dominio"])), "dominios sueltos (todos)"),
+            ("IPs distintas", int(len(contadores["ipv4"])), "direcciones IPv4 validas (todas)"),
             ("Terminos en el vocabulario", int(matriz.shape[1]), "TF-IDF (1-2 gramas)"),
             ("Motor de sentimiento", motor, "implementacion usada"),
         ],

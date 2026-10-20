@@ -34,6 +34,21 @@ def test_ip_invalida_se_descarta():
     assert iocs["ipv4"] == []
 
 
+def test_version_estilo_ip_se_descarta():
+    assert pnl._es_versionish("1.2.3.4") is True
+    assert pnl._es_versionish("10.2.3.4") is True
+    assert pnl._es_versionish("124.248.207.50") is False
+    iocs = pnl.extraer_iocs("version 10.2.3.4 lanzada hoy")
+    assert iocs["ipv4"] == []
+
+
+def test_dominio_no_se_duplica_con_url_ni_email():
+    texto = "visita https://evil.example.com/x o escribe a user@evil.example.com"
+    iocs = pnl.extraer_iocs(texto)
+    dominios = [d for d in iocs["dominio"] if "example.com" in d]
+    assert dominios == []
+
+
 def test_contar_iocs_suma_hash_y_tipos():
     conteo = pnl.contar_iocs(TEXTO)
     assert conteo["ipv4"] == 1

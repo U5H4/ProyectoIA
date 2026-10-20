@@ -25,9 +25,10 @@ Detalle de cada carpeta del proyecto y que se guarda en ella.
 | `etl_load.py` | LOAD: escritura de datos procesados, perfil de columnas y validacion de minimos. |
 | `ml.py` | ML: entrena y evalua varios modelos, guarda el mejor y genera predicciones. |
 | `pnl.py` | PNL: TF-IDF, sentimiento (VADER), entidades (IOC) y resumen/reporte. |
+| `integrar.py` | Combina ML+PNL en un reporte con nivel de riesgo global. |
 | `blockchain.py` | Blockchain: registra el SHA-256 de los resultados y verifica integridad. |
 | `dashboard.py` | Dashboard interactivo en Streamlit. |
-| `run_all.py` | Orquestador; ejecuta etapas (descargar, etl, ml, pnl, blockchain, tests) en orden. |
+| `run_all.py` | Orquestador; ejecuta etapas (descargar, etl, ml, pnl, integrar, blockchain, tests) en orden. |
 
 > Los modulos se ejecutan como scripts (`python src/run_all.py`). Importan entre si
 > de forma plana (`from config import ...`), por lo que `src/` debe ser el directorio
@@ -60,12 +61,13 @@ Detalle de cada carpeta del proyecto y que se guarda en ella.
 | `pnl_top_terminos.csv`, `pnl_sentimiento.csv` | Representacion y sentimiento (PNL). |
 | `pnl_iocs.csv`, `pnl_entidades.csv` | Entidades / IOCs por documento (PNL). |
 | `pnl_resumen.csv`, `pnl_reporte.md` | Resumenes por documento y reporte narrativo (PNL). |
+| `reporte_integrado.md`, `reporte_integrado.json` | Reporte integrado ML+PNL con nivel de riesgo global. |
 | `blockchain_*.csv` | Evidencia de bloques, validacion, integridad y prueba de alteracion. |
 
 ## Otras carpetas
 
 | Carpeta | Contenido |
 |---|---|
-| `models/` | Modelos entrenados y artefactos asociados (no versionado). |
+| `models/` | Modelos entrenados (`modelo_mejor.joblib`, `predictor.joblib`) y artefactos asociados (no versionado). |
 | `logs/` | `pipeline.log` con el detalle de cada ejecucion. |
 | `tests/` | Pruebas automaticas (`python -m pytest tests -q`). |

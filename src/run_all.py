@@ -44,6 +44,8 @@ class Etapa:
 def etapa_descargar() -> int:
     import etl_extract
 
+    print(etl_extract.LICENSE_NOTICE)
+    LOG.info("  Al ejecutar el pipeline completo se asume la aceptacion de la licencia de CICIDS2017.")
     return etl_extract.descargar("all", None, accept_license=True)
 
 
@@ -73,6 +75,13 @@ def etapa_pnl() -> int:
     return 0
 
 
+def etapa_integrar() -> int:
+    from integrar import integrar
+
+    integrar()
+    return 0
+
+
 def etapa_blockchain() -> int:
     from blockchain import ejecutar
 
@@ -89,6 +98,7 @@ ETAPAS = [
     Etapa("etl", "ETL: extraer, transformar, cargar", etapa_etl),
     Etapa("ml", "Machine Learning: entrenar y evaluar modelos", etapa_ml),
     Etapa("pnl", "PNL: analizar reportes de amenazas", etapa_pnl),
+    Etapa("integrar", "Reporte integrado ML+PNL (nivel de riesgo)", etapa_integrar),
     Etapa("blockchain", "Blockchain: registrar y verificar resultados", etapa_blockchain),
     Etapa("tests", "Suite de pruebas", etapa_tests, obligatoria=False),
 ]
@@ -108,7 +118,6 @@ def ejecutar(claves: list[str]) -> int:
         LOG.error("No hay etapas que ejecutar")
         return 2
 
-    asegurar_dir(Path(__file__).resolve().parent)  # noqa: F841
     for directorio in ALL_DIRS:
         asegurar_dir(directorio)
 

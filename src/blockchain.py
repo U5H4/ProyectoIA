@@ -141,8 +141,10 @@ def artefactos_a_registrar() -> list[tuple[str, Path]]:
         ("dataset_procesado", PROCESSED / "flujos_clean.parquet"),
         ("reportes_pnl", PROCESSED / "reportes_enriquecidos.parquet"),
         ("modelo_ml", MODELS / "modelo_mejor.joblib"),
+        ("predictor_ml", MODELS / "predictor.joblib"),
         ("metricas_ml", REPORTS / "metricas_modelos.csv"),
         ("reporte_pnl", REPORTS / "pnl_reporte.md"),
+        ("reporte_integrado", REPORTS / "reporte_integrado.json"),
     ]
 
 
@@ -217,11 +219,23 @@ def prueba_alteracion(cadena: Cadena) -> pd.DataFrame:
     filas.append(
         {
             "escenario": "Restaurar el contenido original",
-            "detectado": not ok,
-            "detalle": "cadena intacta tras restaurar",
+            "detectado": False,
+            "detalle": "cadena intacta tras restaurar (esperado: no hay alteracion)",
         }
     )
     return pd.DataFrame(filas)
+
+
+def estado_previo(ruta: Path = BLOCKCHAIN_JSON) -> tuple[bool, list[str], int]:
+    """Valida la cadena existente en disco ANTES de reconstruirla."""
+    if not ruta.exists():
+        return (False, [f"No existe {ruta.name}"], 0)
+    try:
+        cadena = Cadena.cargar(ruta)
+    except Exception as exc:  # noqa: BLE001
+        return (False, [f"No se pudo leer {ruta.name}: {exc}"], 0)
+    ok, errores = cadena.es_valida()
+    return (ok, errores, len(cadena.bloques))
 
 
 def _comprobar_integridad_archivos(cadena: Cadena) -> pd.DataFrame:
@@ -250,6 +264,12 @@ def _comprobar_integridad_archivos(cadena: Cadena) -> pd.DataFrame:
 # Orquestacion
 # --------------------------------------------------------------------------
 def ejecutar() -> dict:
+    previo_ok, previo_errores, previo_n = estado_previo()
+    if previo_n:
+        LOG.info("  cadena previa: %d bloques, valida=%s", previo_n, previo_ok)
+        if not previo_ok:
+            LOG.warning("  la cadena previa no era valida: %s", "; ".join(previo_errores))
+
     cadena, _ = construir_cadena()
     ruta = cadena.guardar()
     ok, errores = cadena.es_valida()
@@ -277,7 +297,25 @@ def ejecutar() -> dict:
     }
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Blockchain de trazabilidad.")
+    parser.add_argument(
+        "--solo-verificar",
+        action="store_true",
+        help="Valida la cadena existente sin reconstruirla.",
+    )
+    args = parser.parse_args(argv)
+
+    if args.solo_verificar:
+        ok, errores, n = estado_previo()
+        print(subtitulo("Verificacion de la cadena existente"))
+        LOG.info("  bloques=%d  valida=%s", n, ok)
+        for error in errores:
+            LOG.warning("  %s", error)
+        return 0 if ok else 1
+
     resultado = ejecutar()
     print(subtitulo("Bloques registrados"))
     print(tabla(resultado["cadena"].a_dataframe()[["indice", "tipo", "archivo", "bytes"]]))

@@ -14,6 +14,13 @@ deja evidencia de cada una en el CalidadTracker:
   T09 Muestreo y balanceo de clases
   T10 Division de datos y estandarizacion (fit sobre train)
 
+Anti-fuga de datos: T01-T05 son deterministas (no "aprenden" nada del
+dataset). T09 (muestreo) y T10 (division) se ejecutan ANTES de T06/T07/T08,
+de forma que la winsorizacion, las columnas derivadas, la seleccion de
+caracteristicas y el escalado se AJUSTAN solo con el conjunto de entrenamiento
+y luego se APLICAN a train y test. Asi el test queda completamente fuera de
+cualquier decision ajustada a los datos.
+
 Sobre los reportes de texto se aplica limpieza de texto (mismo tracker).
 
 Uso:
@@ -74,6 +81,31 @@ def winsorizar(frame: pd.DataFrame, columnas: list[str], factor: float = IQR_FAC
         if iqr <= 0:
             continue
         bajo, alto = q1 - factor * iqr, q3 + factor * iqr
+        fuera = (serie < bajo) | (serie > alto)
+        afectados += int(fuera.sum())
+        frame[col] = serie.clip(lower=bajo, upper=alto)
+    return afectados
+
+
+def _ajustar_limites_winsor(train: pd.DataFrame, columnas: list[str], factor: float) -> dict:
+    """Calcula los limites [bajo, alto] por columna usando SOLO el train."""
+    limites = {}
+    for col in columnas:
+        serie = train[col].astype(float)
+        q1, q3 = serie.quantile(0.25), serie.quantile(0.75)
+        iqr = q3 - q1
+        if iqr <= 0:
+            continue
+        limites[col] = (q1 - factor * iqr, q3 + factor * iqr)
+    return limites
+
+
+def _aplicar_limites_winsor(frame: pd.DataFrame, limites: dict) -> int:
+    afectados = 0
+    for col, (bajo, alto) in limites.items():
+        if col not in frame.columns:
+            continue
+        serie = frame[col].astype(float)
         fuera = (serie < bajo) | (serie > alto)
         afectados += int(fuera.sum())
         frame[col] = serie.clip(lower=bajo, upper=alto)
@@ -157,19 +189,28 @@ def t05_etiquetas(d: dict, t: CalidadTracker) -> None:
 
 
 def t06_atipicos(d: dict, t: CalidadTracker) -> None:
-    frame = d[TABLA_FLUJOS]
-    antes = len(frame)
-    features = _columnas_feature(frame)
-    afectados = winsorizar(frame, features)
-    d[TABLA_FLUJOS] = frame
+    """Winsorizacion IQR: ajusta los limites con train y los aplica a train/test.
+
+    Se ejecuta DESPUES del split (T10) para no filtrar informacion del test.
+    """
+    train, test = d["train"], d["test"]
+    features = _columnas_feature(train)
+    limites = _ajustar_limites_winsor(train, features, IQR_FACTOR)
+    afectados = _aplicar_limites_winsor(train, limites) + _aplicar_limites_winsor(test, limites)
+    d["train"], d["test"] = train, test
+    d["winsor_limites"] = limites
     t.registrar(
-        6, "Tratamiento de valores atipicos", TABLA_FLUJOS, antes, len(frame), afectados,
-        f"winsorizacion IQR factor {IQR_FACTOR} sobre {len(features)} variables",
-        "clip([Q1 - f*IQR, Q3 + f*IQR])",
+        6, "Tratamiento de valores atipicos", TABLA_FLUJOS, len(train) + len(test),
+        len(train) + len(test), afectados,
+        f"winsorizacion IQR factor {IQR_FACTOR} sobre {len(limites)} variables (limites ajustados solo con train)",
+        "clip([Q1 - f*IQR, Q3 + f*IQR]) fit-on-train",
     )
 
 
 def t07_derivadas(d: dict, t: CalidadTracker) -> None:
+    """Crea variables derivadas (ratios) fila a fila. No ajusta nada, no filtra
+    informacion entre train y test (es determinista), por eso puede ir antes del
+    split."""
     frame = d[TABLA_FLUJOS]
     antes = len(frame)
     nuevas = []
@@ -188,20 +229,29 @@ def t07_derivadas(d: dict, t: CalidadTracker) -> None:
     t.registrar(
         7, "Creacion de variables derivadas", TABLA_FLUJOS, antes, len(frame), len(nuevas),
         f"variables creadas: {', '.join(nuevas) if nuevas else 'ninguna'}",
-        "ratios de flujo (bytes/paquete, flags, tasa)",
+        "ratios de flujo (bytes/paquete, flags, tasa) fila a fila",
     )
 
 
 def t08_seleccion(d: dict, t: CalidadTracker) -> None:
-    frame = d[TABLA_FLUJOS]
-    features_antes = _columnas_feature(frame)
-    constantes = [c for c in features_antes if frame[c].nunique(dropna=False) <= 1]
-    frame = frame.drop(columns=constantes)
-    d[TABLA_FLUJOS] = frame
+    """Elimina columnas constantes detectadas SOLO en train (aplicado a ambos)."""
+    train, test = d["train"], d["test"]
+    features_antes = _columnas_feature(train)
+    constantes = [c for c in features_antes if train[c].nunique(dropna=False) <= 1]
+    train = train.drop(columns=constantes)
+    test = test.drop(columns=[c for c in constantes if c in test.columns])
+    d["train"], d["test"] = train, test
+    d["columnas_constantes"] = constantes
+    escalado = d.get("escalado")
+    if escalado:
+        escalado["columnas"] = [c for c in escalado["columnas"] if c not in constantes]
+        for key in ("media", "desviacion"):
+            escalado[key] = {k: v for k, v in escalado[key].items() if k not in constantes}
     t.registrar(
-        8, "Seleccion de caracteristicas", TABLA_FLUJOS, len(features_antes), len(_columnas_feature(frame)),
-        len(constantes), f"{len(constantes)} variables constantes eliminadas",
-        "drop columnas con varianza cero",
+        8, "Seleccion de caracteristicas", TABLA_FLUJOS, len(features_antes),
+        len(_columnas_feature(train)), len(constantes),
+        f"{len(constantes)} variables constantes eliminadas (segun train)",
+        "drop columnas con varianza cero (fit-on-train)",
     )
 
 
@@ -211,7 +261,10 @@ def t09_muestreo(d: dict, t: CalidadTracker, sample_size: int, max_per_class: in
     clases = sorted(frame[TARGET_COLUMN].astype(str).unique())
     por_clase = min(max_per_class, max(1, sample_size // max(len(clases), 1)))
     partes = [
-        frame.loc[frame[TARGET_COLUMN].astype(str) == c].head(por_clase)
+        frame.loc[frame[TARGET_COLUMN].astype(str) == c].sample(
+            n=min(int((frame[TARGET_COLUMN].astype(str) == c).sum()), por_clase),
+            random_state=SEED,
+        )
         for c in clases
     ]
     frame = pd.concat(partes, ignore_index=True).sample(frac=1.0, random_state=SEED)
@@ -219,15 +272,24 @@ def t09_muestreo(d: dict, t: CalidadTracker, sample_size: int, max_per_class: in
     t.registrar(
         9, "Muestreo y balanceo de clases", TABLA_FLUJOS, antes, len(frame),
         antes - len(frame), f"hasta {por_clase} registros por clase ({len(clases)} clases)",
-        "muestreo estratificado por clase",
+        "muestreo aleatorio balanceado por clase (random_state=SEED)",
     )
 
 
-def t10_division_escalado(d: dict, t: CalidadTracker) -> None:
+def t10_division(d: dict, t: CalidadTracker) -> None:
+    """Divide train/test (estratificado). El escalado se aplica despues."""
     frame = d[TABLA_FLUJOS]
     train, test = train_test_split(
         frame, test_size=TEST_SIZE, random_state=SEED, stratify=frame[TARGET_COLUMN]
     )
+    d["train"] = train.reset_index(drop=True)
+    d["test"] = test.reset_index(drop=True)
+
+
+def t10_escalado(d: dict, t: CalidadTracker) -> None:
+    """Estandariza ajustando el escalador SOLO con train (cero fuga)."""
+    frame = d[TABLA_FLUJOS]
+    train, test = d["train"], d["test"]
     features = _columnas_feature(train)
     escalador = StandardScaler()
     columnas = [c for c in features if pd.api.types.is_numeric_dtype(train[c])]
@@ -298,13 +360,33 @@ def transformar(
     t03_corregir_tipos(d, tracker)
     t04_faltantes_inf(d, tracker)
     t05_etiquetas(d, tracker)
-    t06_atipicos(d, tracker)
     t07_derivadas(d, tracker)
-    t08_seleccion(d, tracker)
     t09_muestreo(d, tracker, sample_size, max_per_class)
-    t10_division_escalado(d, tracker)
+    t10_division(d, tracker)
+    t06_atipicos(d, tracker)
+    t08_seleccion(d, tracker)
+    t10_escalado(d, tracker)
+    d[TABLA_FLUJOS] = _recomponer_clean(d)
     limpiar_reportes(d, tracker)
     return d, tracker
+
+
+def _recomponer_clean(d: dict) -> pd.DataFrame:
+    """Reconstruye flujos_clean (para EDA) con train+test ya winsorizados.
+
+    Se usa solo para perfilar el dataset limpio: des-escala las columnas
+    numericas para conservar los valores en su unidad original.
+    """
+    train = d["train"].copy()
+    test = d["test"].copy()
+    columnas = d["escalado"]["columnas"]
+    media = pd.Series(d["escalado"]["media"])
+    desv = pd.Series(d["escalado"]["desviacion"])
+    for frame in (train, test):
+        for col in columnas:
+            if col in frame.columns and col in media.index and col in desv.index and desv[col] != 0:
+                frame[col] = frame[col] * desv[col] + media[col]
+    return pd.concat([train, test], ignore_index=True)
 
 
 def main() -> int:
