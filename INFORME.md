@@ -6,10 +6,12 @@ Sistema Inteligente de Análisis, Predicción y Trazabilidad de Incidentes de Ci
 
 ## 2. INTEGRANTES
 
-[Nombre del Equipo — Integrantes: 3 estudiantes]
+- HERNANDEZ ARIAS ULISES
+- LUCIANO CRUZ CARLOS IVAN
+- RIVERA ROSADO ALAN JOVANI
 
 - Asignatura: Proyecto Integrador de IA
-- Fecha: Octubre 2026
+- Fecha: Noviembre 2026
 
 ## 3. PLANTEAMIENTO DEL PROBLEMA
 
@@ -711,3 +713,188 @@ El equipo siguió un enfoque iterativo basado en CRISP-DM como guía conceptual 
 - **Evaluación:** holdout estratificado, métricas por clase honestas (Heartbleed/Infiltration declaradas no generalizables).
 - **Integración y trazabilidad:** ML+PNL → integración; cadena blockchain para artefactos.
 - **Revisión:** auditorías multiagente internas (sin modificar) y ejecución del pipeline completo tras cada cambio.
+
+## ANEXO F — NOTA PARA EL GENERADOR DEL DOCUMENTO FINAL
+
+Este `INFORME.md` es la **fuente de verdad** para redactar el documento final (Word/PDF). Quien genere el documento debe respetar estas reglas:
+
+1. **No inventar cifras ni resultados.** Todos los números (19.815 flujos, 974 reportes, F1-macro 0.9899 / CV 0.978, 38.759 IOCs, 8 bloques, 64/64 tests, etc.) proceden de los artefactos del repo (`data/reports/`, `ml_resumen.json`, `cadena.json`); si alguna cifra no aparece aquí, no debe re-estimarse ni redondearse sin evidencia.
+2. **Mantener las limitaciones declaradas** (muestreo, soporte minoritario Heartbleed/Infiltration, VADER como proxy léxico, blockchain local sin consenso, sin pinning de datasets). El documento final no debe presentar el prototipo como producción ni las métricas como prevalencia real.
+3. **Integrantes y equipo:** §2 ya contiene los nombres reales (HERNANDEZ ARIAS ULISES, LUCIANO CRUZ CARLOS IVAN, RIVERA ROSADO ALAN JOVANI); no cambiarlos ni sustituirlos por marcadores.
+4. **Figuras:** las 4 figuras están en `data/figures/` (o inline en `data/reports/indice.html`). Insertarlas en el documento final con los pies descritos en §13.9 y §14.8 (sin títulos internos en las figuras; el índice lleva encabezados 1–4).
+5. **Dashboard:** insertar capturas reales de las 5 pestañas (Resumen, Datos, ML, PNL, Blockchain) en la sección de resultados/demostración.
+6. **Tono:** académico en español, tercera persona, sin marketing; mantener el enfoque honesto de "prototipo verificable".
+7. **Formato de citas:** las bibliográficas en §22 pueden reformatearse a APA si la asignatura lo exige.
+8. **No añadir** componentes, métricas o funcionalidades que no estén descritos aquí (no inflar el alcance).
+9. **Orden sugerido del documento final:** Portada → Integrantes → Índice → Problema/Antecedentes/Justificación → Objetivos → Alcance/Limitaciones/Supuestos → Usuarios → Solución y arquitectura → Fuentes de datos y preparación (T01–T10) → ML (selección, CV, resultados, figuras) → PNL (4 funcionalidades + figuras) → Blockchain → Dashboard → Resultados/evaluación → Conclusiones → Trabajo futuro → Bibliografía → Anexos (comandos, evidencia, estructura, glosario).
+
+## ANEXO G — GUÍA DE ESTUDIO Y DEFENSA DEL PROYECTO
+
+Material pensado para **estudiar el proyecto y prepararlo para presentarlo**. Todos los datos proceden del propio repositorio; no hay cifras inventadas.
+
+### G.1 Elevator pitch (30 segundos)
+
+> «Tenemos un prototipo local y reproducible que toma tráfico de red CICIDS2017 y reportes CTI públicos, clasifica los flujos por tipo de ataque con Machine Learning (Random Forest, elegido por validación cruzada), extrae IOCs y términos de los reportes con PNL, integra ambas señales en un reporte con nivel de riesgo, y sella los artefactos en una cadena de bloques SHA-256 para que nadie pueda alterarlos sin que se note. Un dashboard permite consultarlo todo y verificar la integridad en vivo.»
+
+### G.2 Mapa del repositorio (qué hay y para qué)
+
+```
+proyectoIA/
+├── README.md                  # cómo reproducir/usar (audiencia: usuarios y evaluadores)
+├── INFORME.md                 # fuente del entregable (este documento)
+├── requirements.txt           # dependencias exactas del entorno
+├── run_all.py → src/run_all.py  # orquestador del pipeline completo
+├── src/
+│   ├── config.py              # rutas, SEED, fuentes HF, parámetros ETL/ML/PNL/blockchain
+│   ├── utils.py               # utilidades comunes (logs, dirs, formato de números)
+│   ├── etl_extract.py         # descarga + muestreo por archivo (cap por archivo/clase)
+│   ├── etl_transform.py       # T01..T10: dedup, unicode, coerce, inf/NaN, etiquetas,
+│   │                          #   winsor IQR×3 (fit TRAIN), derivadas T07, constantes T08, split, scale
+│   ├── etl_load.py            # validación contra mínimos 5.000/300; perfil de columnas
+│   ├── ml.py                  # 6 algoritmos, CV estratificada, GridSearchCV, métricas, figuras
+│   ├── pnl.py                 # TF-IDF, VADER (proxy), IOCs (desdefangueo+exclusión mutua),
+│   │                          #   resumen extractivo, KPIs
+│   ├── integrar.py            # ML+PNL → reporte integrado con nivel de riesgo (ALTO/MEDIO/BAJO)
+│   ├── blockchain.py          # cadena SHA-256 propia, --solo-verificar, archivado de cadena previa
+│   ├── dashboard.py           # Streamlit: 5 pestañas, predicción CSV, verificador en vivo
+│   ├── indice.py              # genera data/reports/indice.html (4 figuras inline, sin CDN)
+│   └── run_all.py             # contrato de pipeline: orden fijo, se detiene ante fallo
+├── tests/                     # 64 pruebas (ver G.5)
+├── data/
+│   ├── raw/                   # parquets crudos descargados (no versionados)
+│   ├── processed/             # flujos limpios, predicciones, predictor, JSON de transformación
+│   ├── reports/               # evidencia CSV/MD/JSON por etapa (ver G.6)
+│   ├── figures/               # 4 figuras HTML interactivas + plotly.min.js local
+│   └── blockchain/            # cadena.json + backups de cadenas previas
+├── models/                    # modelo_mejor.joblib, predictor.joblib
+└── logs/pipeline.log          # bitácora de ejecución del pipeline
+```
+
+### G.3 Recorrido detallado por módulo (qué hace cada uno y qué mirar)
+
+**`config.py`** — el contrato del proyecto. Rutas (`data/...`), semilla `SEED = 20261007` (todo el muestreo/split/CV depende de ella), las dos fuentes (HF CICIDS2017 y CTI), los `LABEL_GROUPS` que mapean las 15 etiquetas crudas a 9 clases, límites del ETL (`TEST_SIZE=0.30`, `DEFAULT_SAMPLE_SIZE=40_000`, `DEFAULT_MAX_PER_CLASS=6_000`, cap por archivo/clase 2_000, `IQR_FACTOR=3.0`), mínimos del enunciado (5_000 / 300), `CV_FOLDS=5`, parámetros PNL (top-25 términos, 2 oraciones de resumen, 4.000 chars para sentimiento) y la ruta de `BLOCKCHAIN_JSON`. **Si cambias algo aquí, cambia el comportamiento global; por eso todo está centralizado.**
+
+**`etl_extract.py`** — descarga (si no existe) los 8 parquets de CICIDS2017 y el parquet CTI. Muestrea por archivo con cap por clase (2_000) y `random_state=SEED`, de forma reproducible; perfila tipos numéricos/texto y cuenta nulos. Por qué existe: sin cap por archivo las clases mayoritarias de un único día dominarían la muestra.
+
+**`etl_transform.py`** — el corazón de la preparación. Orden real de ejecución:
+
+1. **T01** dedup exacto (flujos; y tras truncar CTI a `CTI_MAX_CHARS=20_000`).
+2. **T02** normalización unicode de etiquetas (quita `\ufffd`).
+3. **T03** `pd.to_numeric(errors='coerce')`.
+4. **T04** Inf→NaN + `dropna`.
+5. **T05** mapeo a 9 clases (`LABEL_GROUPS`).
+6. **T07** derivadas: `bytes_por_paquete_fwd`, `ratio_paquetes_bwd_fwd`, `ratio_flag_syn`, `tasa_bytes_fwd`.
+7. **T09** muestreo/balanceo (máx. `min(6000, 40000/9≈4444)` por clase ⇒ 19.815).
+8. **T06** winsorización IQR×3 ajustada **sólo en TRAIN** (antes del split NO se toca; límites quedan en `transformacion.json`).
+9. **T08** eliminar constantes (nunique≤1 en TRAIN; 82→72 columnas).
+10. **T10** split estratificado 70/30 + `StandardScaler` ajustado en TRAIN; media/desviación en `estandarizacion.json`.
+
+Cada paso queda línea-a-línea en `data/reports/calidad_transformaciones.csv`. La idea clave: **fit en TRAIN, transform en test e inferencia** — ningún estadístico de test contamina el entrenamiento.
+
+**`etl_load.py`** — verifica que `flujos_clean` y CTI superen los mínimos (5_000/300) y genera `validacion_minimos.csv` y el perfil de columnas; si no se cumple, lanza error y el pipeline se detiene (fail-fast).
+
+**`ml.py`** — entrena los 6 candidatos con CV estratificada (5 folds, `SEED`), ordena por F1-macro CV, desempatando por `cv_desviacion`; reajusta sólo al ganador con GridSearchCV (`{'max_depth': [10,20], 'n_estimators': [100,200,300]}` → `{20, 300}`); evalúa en test; guarda modelo, predictor (joblib con modelo + `transformacion.json` + `estandarizacion.json` + orden de features), predicciones y métricas. `predecir()` replica exactamente el preprocesado de inferencia (sin fuga train→prod) y es lo que usa el dashboard para puntuar un CSV subido.
+
+**`pnl.py`** — cuatro funcionalidades: (1) TF-IDF con stopwords ampliadas (incluidas `com`, `www`, `http`...), ngramas 1–2, tope 4_000; (2) sentimiento VADER sobre 4_000 chars, reportado como **proxy léxico** (558/392/24); (3) extracción de IOCs por reglas validadas: IPv4 con chequeo 0–255/sin reservadas, contexto anti-"versión X.Y.Z.W", desdefangueo `hxxp→http` y `[.]→.`, exclusión mutua URL→email→IP→hash→CVE→dominio; (4) resumen extractivo top-2 oraciones por IDF. Resultados: 38.759 IOCs, 906/974 docs con ≥1 IOC.
+
+**`integrar.py`** — cruza señales: señal ML fuerte (F1 ≥ 0.85) + señal CTI negativa (≥30 % docs negativos) ⇒ riesgo **ALTO** (nuestro caso); con una sola ⇒ MEDIO; ninguna ⇒ BAJO. Escribe `reporte_integrado.{md,json}`.
+
+**`blockchain.py`** — cadena propia: bloque 0 génesis, bloques con `indice`, `timestamp` UTC, `datos` (metadatos del artefacto), `hash_previo`, `hash=SHA256(bloque)`; `hash_archivo()` re-hashea artefactos; `es_valida()` recalcula toda la cadena; `--solo-verificar` re-hashea los 7 artefactos contra la cadena persistida sin reconstruir; `ejecutar()` archiva la cadena previa (`cadena_<UTC>.backup.json`) y, si la previa es inválida o falta algo, archiva y aborta (salvo `--reconstruir-forzadamente`).
+
+**`dashboard.py`** — Streamlit, 5 pestañas (Resumen/Datos/ML/PNL/Blockchain). Upload de CSV crudo ⇒ `predecir()` ⇒ tipo de ataque + score; la pestaña Blockchain recalcula `es_valida()` y re-hashea los artefactos **en vivo**; AppTest (`tests/test_dashboard.py`) garantiza que renderiza sin excepciones. **Prueba rápida:** subir `examples/flujos_ejemplo.csv` (200 flujos crudos: 100 BENIGN + 100 BruteForce, columna `Label` sólo de referencia y es ignorada por el modelo) desde la pestaña ML; ~99 % coincide con la etiqueta.
+
+**`indice.py`** — genera `indice.html`: una sola página, 4 figuras Plotly inline (sin red; `plotly.min.js` local), encabezados 1–4, colores variados, sin CDNs. Se invoca al final de `integrar.py` (fallo ⇒ warning, no detiene el pipeline).
+
+**`run_all.py`** — orquestador: `descarga → etl → ml → pnl → integrar → blockchain`, con `--sin-descargar`, `--solo <etapa>`, `--listar`, `--tests`; ante cualquier etapa fallida se detiene y el error queda en `logs/pipeline.log`.
+
+### G.4 Parámetros que conviene memorizar para la presentación
+
+| Parámetro | Valor | Dónde |
+|---|---|---|
+| Semilla | `SEED=20261007` | `config.py` |
+| Muestra máxima/clase (pre-split) | 4.444 (`40000/9`) | `etl_transform.py` + `config.py` |
+| Winsorización | IQR×3.0, fit en TRAIN | `config.py` / `transformacion.json` |
+| Split | 70/30 estratificado | `TEST_SIZE=0.30` |
+| CV | 5 folds estratificados | `CV_FOLDS=5` |
+| GridSearchCV (ganador) | `max_depth=20`, `n_estimators=300` | `ml.py` |
+| Tope TF-IDF | 4.000 términos, ngramas 1–2 | `pnl.py` |
+| Truncados | 20.000 (ETL corpus), 4.000 (VADER) | `config.py` |
+| Mínimos enunciado | 5.000 flujos / 300 reportes | `config.py` |
+| Cadena | 8 bloques (génesis + 7 artefactos), SHA-256 | `blockchain.py` |
+
+### G.5 Inventario de las 64 pruebas (qué garantiza cada grupo)
+
+- **`test_extract.py` (5):** muestreo por archivo respeta el cap, es aleatorio y reproducible con la semilla, tolera ausencia de columna etiqueta, infiere tipos y cuenta marcadores de nulos.
+- **`test_transform.py` (8):** unicode de etiquetas, winsorización recorta atípicos, el pipeline registra las transformaciones, etiquetas agrupadas a 9 clases, split estratificado + escalado (media≈0/desv≈1 en train), derivadas T07 en orden y nombre, fórmula compartida derivada, y `transformacion.json` persistido y coherente.
+- **`test_load.py` (3):** perfil de columnas, mínimos OK, mínimos FAIL lanza error.
+- **`test_ml.py` (~22):** separación X/y, matriz de confusión cuadrada, importancias ordenadas, métricas esperadas, ≥4 algoritmos definidos, round-trip de predicción CSV, **inferencia idéntica al entrenamiento**, winsor aplicado antes de escalar, reutilización de derivadas si el CSV ya las trae, orden de columnas crudas irrelevante, error claro si faltan columnas imprescindibles o hay NaN en variables requeridas, carga de predictor desde disco, error claro con predictor incompleto, fallback si faltan metadatos.
+- **`test_pnl.py` (14):** IOCs por tipo, IP inválida descartada, "versión estilo IP" descartada por contexto, reservadas fuera, desdefangueados detectados, dominio no duplicado en URL/email, suma de IOCs, sentimiento válido, sentimiento con respaldo, resumen no vacío, top términos ordenado, términos clave, reflujo PDF con espacios.
+- **`test_integrar.py` (4):** riesgo ALTO/MEDIO/BAJO/sin datos según señales.
+- **`test_blockchain.py` (8):** cadena válida, encadenado de hashes, alteración detectada, hash determinista, guardar/cargar, hash de archivo, prueba de alteración reporta DETECTADO, **verificación offline detecta artefacto modificado**.
+- **`test_dashboard.py` (1):** las 5 pestañas renderizan sin excepción (AppTest).
+- **`test_run_all.py` (6):** orden del pipeline, `--sin-descargar`, `--solo`, etapa desconocida → código 2, `--tests` opcional y al final.
+
+Mensaje para el comité: *«no sólo funciona, está verificado: 64 pruebas que fijan el comportamiento antes de la entrega»*.
+
+### G.6 Artefactos generados (evidencia citable)
+
+| Archivo | Qué contiene | Quién lo genera |
+|---|---|---|
+| `data/reports/validacion_minimos.csv` | 19.815 ≥ 5.000 y 974 ≥ 300 | `etl_load.py` |
+| `data/reports/calidad_transformaciones.csv` | antes→después de cada T | `etl_transform.py` |
+| `data/reports/perfil_columnas.csv` | diccionario de datos automatizado | `etl_load.py` |
+| `data/reports/evidencia_extraccion*.csv` | perfil por archivo/columna | `etl_extract.py` |
+| `data/reports/metricas_modelos.csv` | las 6 filas de comparación (CV y test) | `ml.py` |
+| `data/reports/metricas_por_clase.csv` | precision/recall/F1 por clase (test) | `ml.py` |
+| `data/reports/matriz_confusion.csv` | 9×9 en holdout | `ml.py` |
+| `data/reports/importancia_variables.csv` | pesos del RF | `ml.py` |
+| `data/reports/ml_resumen.json` | resumen ejecutivo ML | `ml.py` |
+| `data/reports/pnl_{sentimiento,iocs,entidades,top_terminos,resumen}.csv` + `pnl_reporte.md` | resultados PNL | `pnl.py` |
+| `data/reports/reporte_integrado.{md,json}` | riesgo global ML+PNL | `integrar.py` |
+| `data/reports/blockchain_{bloques,validacion,prueba_alteracion}.csv` | evidencia de la cadena | `blockchain.py` |
+| `data/reports/indice.html` | índice único de las 4 figuras | `indice.py` |
+| `data/processed/flujos_test.parquet` | holdout 5.945×75 | `etl_transform.py` |
+| `data/processed/predicciones_test.parquet` | label / predicción / acierto | `ml.py` |
+| `models/predictor.joblib` | modelo + transformación + escalado | `ml.py` |
+| `data/blockchain/cadena.json` | 8 bloques SHA-256 | `blockchain.py` |
+
+### G.7 Preguntas probables del comité (y cómo responderlas)
+
+1. **¿Por qué Random Forest y no Árbol de Decisión, si el Árbol saca 0.9905 en test?** — Porque la selección se hizo por CV sobre TRAIN (0.978 ± 0.011 vs 0.9745 ± 0.0243); usar test para elegir sería sesgo de selección. El test quedó reservado para evaluar el ganador, no para elegirlo.
+2. **¿Por qué F1-macro?** — Porque las clases están desbalanceadas tras muestreo y queremos castigar el fallo en clases minoritarias; la accuracy engaña con clases grandes.
+3. **¿Por qué los datos están balanceados «artificialmente»?** — Submuestreo documentado (máx. 4.444/clase) por límites de cómputo; es un compromiso conocido, declarado en §8.2 y §12.3, y en el futuro se reportaría también sobre la prevalencia real (Trabajo futuro #2).
+4. **¿VADER es un modelo de sentimiento de amenazas?** — No; es un proxy léxico (Hutto & Gilbert) usado como señal de contexto, jamás como diagnóstico. Los CTI disparan léxico negativo (attack, exploit) aunque describan defensas; por eso se declara en el dashboard y en el informe.
+5. **¿Cómo garantiza integridad el blockchain si es propio/local?** — No garantiza inmutabilidad contra un custodio malicioso; garantiza **detección** de alteraciones: cualquier cambio en un artefacto rompe el hash encadenado, y `--solo-verificar`/el dashboard lo reportan (test end-to-end incluido). Para ancla externa haría falta timestamping público (Trabajo futuro #6).
+6. **¿Los IOCs salen con un NER entrenado?** — No; reglas validadas con desdefangueo y exclusión mutua. Un NER entrenado (spaCy/transformer) es Trabajo futuro #3.
+7. **¿Cómo reproducen ustedes lo mismo en otra máquina?** — Semilla fija (`20261007`), transformaciones persistidas (`transformacion.json`, `estandarizacion.json`), parquet intermedios, y `python src/run_all.py --sin-descargar` + `pytest` como contrato ejecutable.
+8. **¿Qué pasa si el CSV subido al dashboard no trae las columnas?** — `predecir()` valida presencia de columnas imprescindibles y NaN en variables requeridas y devuelve error claro, nunca una predicción silenciosamente errónea.
+9. **¿Por qué Streamlit y no algo "serio"?** — Prototipo local, reproducible, con AppTest en `tests/`; la seriedad está en la verificación, no en el stack.
+10. **¿Cuál es el aporte real?** — La integración honesta y verificable: ETL con evidencia, ML con selección por CV (no por test), PNL con desdefangueo real, blockchain con verificación en vivo, todo citable desde artefactos.
+
+### G.8 Errores típicos al ejecutar (y cómo salir)
+
+- `ModuleNotFoundError: No module named 'pandas'` → instalar: `pip install -r requirements.txt` (Python 3.10+).
+- Descarga de datasets falla → usar `python src/run_all.py --sin-descargar` si el raw ya está; o enlace manual en README §«Fuentes de datos».
+- `streamlit run src/dashboard.py` abre en blanco → comprobar que existe `data/blockchain/cadena.json`; si no, ejecutar `python src/blockchain.py`.
+- `pytest` falla en Windows por rutas → ejecutar desde la raíz del repo (`C:\Users\laus3\Documents\Default Project\proyectoIA`).
+- Al re-ejecutar `run_all`, la cadena se archiva sola → es el comportamiento esperado (`cadena_<UTC>.backup.json`).
+- Warning "plotly no disponible" → `pip install plotly`; el índice se genera sin él (el pipeline no se detiene).
+
+### G.9 Ruta de estudio sugerida (2 horas antes de presentar)
+
+1. **10 min** — Lee §3, §6, §7, §8, §10 del informe (problema, objetivos, alcance, solución).
+2. **15 min** — §11–§12 y § G.3: fuentes, T01–T10, mínimos y evidencia.
+3. **20 min** — §13 y §G.7 (6 algoritmos, CV, GridSearch, figuras).
+4. **15 min** — §14 y G.3 módulo `pnl.py` (TF-IDF/VADER/IOCs/resumen).
+5. **10 min** — §15 (blockchain, prueba de alteración, backups).
+6. **10 min** — §16–§17 (arquitectura y dashboard).
+7. **10 min** — §18–§20 (resultados, conclusiones, trabajo futuro) + G.7.
+8. **10 min** — ejecuta `python src/run_all.py --sin-descargar` y `streamlit run src/dashboard.py` para verlo.
+9. **10 min** — ensayo en voz alta con la tabla de diapositivas (ANEXO E).
+
+### G.10 Cómo explicar cada figura en la defensa
+
+- **comparacion_modelos.html** — «barras por algoritmo según la métrica de selección (CV=5); el test está disponible como hover/CSV, nunca decidí el ganador con él».
+- **matriz_confusion.html** — «9×9 en holdout; los fallos se concentran en las clases con soporte ínfimo (Heartbleed/Infiltration), que declaramos no generalizables».
+- **pnl_sentimiento.html** — «proxy léxico VADER; 57 % de los CTI usa vocabulario de ataque».
+- **pnl_top_terminos.html** — «de qué habla el corpus: malware/APT/security/threat; no es urgencia, es contexto».
