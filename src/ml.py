@@ -287,46 +287,35 @@ def _guardar_figuras(metricas: pd.DataFrame, matriz: pd.DataFrame, mejor: str) -
     asegurar_dir(FIGURES)
 
     orden = metricas.sort_values("f1_macro").reset_index(drop=True)
-    orden["etiqueta"] = [
-        f"test={f1:.4f} · CV={cv:.4f}"
-        for f1, cv in zip(orden["f1_macro"], orden["cv_f1_macro"])
-    ]
     figura = px.bar(
         orden,
         x="cv_f1_macro", y="modelo", orientation="h",
-        labels={"cv_f1_macro": "F1-macro (CV=5)", "modelo": "Algoritmo"},
-        text="etiqueta",
+        labels={"cv_f1_macro": "F1-macro (CV=5, selección)", "modelo": "Algoritmo"},
+    )
+    figura.update_traces(
+        marker_color=px.colors.qualitative.Set1[:len(orden)],
     )
     figura.update_layout(
-        title="Comparación de algoritmos (selección por CV; prueba al lado)",
-        title_x=0.5,
-        margin=dict(l=130, r=150, t=70, b=50),
-        annotations=[
-            dict(
-                x=0.99, y=-0.16, xref="paper", yref="paper", showarrow=False,
-                text="Ganador por CV (F1-macro medio, 5 folds sobre train): Random Forest (0.978 ± 0.011). "
-                     "No se usa el test para elegir.",
-                align="right", font=dict(size=12, color="#37474f"),
-            ),
-        ],
-        font=dict(size=13),
-        height=470,
+        margin=dict(l=110, r=40, t=30, b=50),
+        font=dict(size=12),
+        height=560,
+        uniformtext=dict(minsize=10, mode="show"),
     )
-    figura.update_traces(textposition="outside", cliponaxis=False, marker_color="#00838f")
-    figura.update_xaxes(range=[0.85, 1.04])
+    figura.update_xaxes(range=[0.80, 1.02], tick0=0.8, dtick=0.02)
     figura.write_html(FIGURES / "comparacion_modelos.html", include_plotlyjs="directory")
 
     heatmap = go.Figure(
         data=go.Heatmap(
             z=matriz.to_numpy(), x=list(matriz.columns), y=list(matriz.index),
-            colorscale="Blues", text=matriz.to_numpy(), texttemplate="%{text}",
+            colorscale="YlGnBu", text=matriz.to_numpy(), texttemplate="%{text}",
             hovertemplate="Real: %{y}<br>Predicho: %{x}<br>Flujos: %{z}<extra></extra>",
         )
     )
     heatmap.update_layout(
-        title=f"Matriz de confusión — {mejor} (test, 5.945 flujos)",
-        title_x=0.5, xaxis_title="Predicho", yaxis_title="Real",
-        font=dict(size=13), height=560, margin=dict(l=90, r=40, t=70, b=90),
+        xaxis_title="Predicho", yaxis_title="Real",
+        font=dict(size=13), height=560, margin=dict(l=90, r=40, t=30, b=90),
+        xaxis=dict(tickmode="linear", dtick=1, automargin=True),
+        yaxis=dict(tickmode="linear", dtick=1, automargin=True),
         annotations=[
             dict(
                 x=0.99, y=-0.25, xref="paper", yref="paper", showarrow=False,

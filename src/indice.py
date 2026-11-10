@@ -91,7 +91,7 @@ def generar_indice(figuras=None, reporte=None) -> str:
     main {{ max-width:1100px; margin:auto; padding:24px; }}
     .figura {{ margin-bottom:28px; }}
     .figura h2 {{ margin:0 0 6px; color:#263238; font-size:18px; border-bottom:1px solid #cfd8dc; padding-bottom:6px; }}
-    .plot {{ height:480px; width:100%; }}
+    .plot {{ height:560px; width:100%; }}
   </style>
 </head>
 <body>

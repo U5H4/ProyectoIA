@@ -384,22 +384,27 @@ def _guardar_figuras(sentimiento_df: pd.DataFrame, terminos: pd.DataFrame) -> No
     px.bar(
         sentimiento_df, x="sentimiento", y="documentos", color="sentimiento",
         color_discrete_map={"negativo": "#d32f2f", "positivo": "#2e7d32", "neutro": "#607d8b"},
-        title="Documentos por sentimiento (VADER — proxy léxico, truncado 4.000 chars)",
         text="documentos", labels={"documentos": "N.º documentos", "sentimiento": "Sentimiento"},
     ).update_layout(
         title_x=0.5, font=dict(size=13),
-        margin=dict(l=70, r=30, t=70, b=60),
+        margin=dict(l=70, r=30, t=20, b=60),
+        height=560,
     ).update_traces(textposition="outside", showlegend=False).update_yaxes(rangemode="tozero", range=[0, 630]).write_html(
         FIGURES / "pnl_sentimiento.html", include_plotlyjs="directory"
     )
+    # Mantener etiquetas de todos los terminos (evita que plotly las colapse a cada 2 filas)
+    todos = terminos.sort_values("relevancia").reset_index(drop=True)
+    colores_terms = (px.colors.qualitative.Plotly + px.colors.qualitative.Dark2 + px.colors.qualitative.Set2)[: len(todos)]
     px.bar(
-        terminos.sort_values("relevancia"), x="relevancia", y="termino",
-        orientation="h", color_discrete_sequence=["#00838f"],
+        todos, x="relevancia", y="termino",
+        orientation="h", color="termino", color_discrete_sequence=colores_terms,
         labels={"relevancia": "Relevancia TF-IDF (sumatoria)", "termino": "Término"},
-        title="Términos más relevantes (TF-IDF)",
     ).update_layout(
-        title_x=0.5, font=dict(size=13),
-        margin=dict(l=110, r=30, t=70, b=60),
+        title_x=0.5, font=dict(size=12),
+        margin=dict(l=120, r=40, t=20, b=60),
+        height=560,
+        showlegend=False,
+        yaxis=dict(tickmode="linear", dtick=1, automargin=True),
         annotations=[
             dict(
                 x=0.99, y=-0.22, xref="paper", yref="paper", showarrow=False,
