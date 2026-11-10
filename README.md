@@ -290,11 +290,11 @@ proyectoIA/
 ├── models/             Modelos entrenados (no versionado)
 ├── logs/               Logs de ejecucion (no versionado)
 ├── tests/              Pruebas
-├── ARQUITECTURA.md     Arquitectura del sistema (flujo completo)
+├── INFORME.md          Informe técnico completo (fuente para el Word)
 └── requirements.txt
 ```
 
-Ver `README_CARPETAS.md` para el detalle de cada carpeta.
+Guía detallada del flujo, decisiones de diseño y justificación completa en `INFORME.md`.
 
 ## Licencia
 
