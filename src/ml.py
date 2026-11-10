@@ -13,6 +13,10 @@ de riesgo (BENIGN, DoS, DDoS, PortScan, WebAttack, ...).
 Artefactos:
     models/modelo_mejor.joblib            modelo ganador (reutilizable)
     models/<algoritmo>.joblib             cada candidato entrenado
+    models/predictor.joblib               paquete de inferencia (modelo + features
+                                          + escalado + metadatos de transformacion)
+    data/processed/estandarizacion.json   media/desviacion por variable (fit train)
+    data/processed/transformacion.json    limites winsor, constantes y derivadas T07 (fit train)
     data/processed/predicciones_test.parquet
     data/reports/metricas_modelos.csv     comparacion de algoritmos
     data/reports/metricas_por_clase.csv   detalle del modelo ganador
@@ -58,7 +62,7 @@ from config import (
     SEED,
     TARGET_COLUMN,
 )
-from utils import LOG, asegurar_dir, numero, subtitulo, tabla, titulo
+from utils import LOG, DERIVADAS_T07, TRANSFORMACION_JSON, asegurar_dir, crear_derivada, numero, subtitulo, tabla, titulo
 
 TRAIN = PROCESSED / "flujos_train.parquet"
 TEST = PROCESSED / "flujos_test.parquet"
@@ -151,12 +155,17 @@ def rejillas_hiperparametros() -> dict[str, dict]:
 
 def ajustar_hiperparametros(
     nombre: str, X_train: pd.DataFrame, y_train: pd.Series
-) -> tuple[object, dict, float]:
-    """Busca los mejores hiperparametros con validacion cruzada sobre train."""
+) -> tuple[object, dict, float, float]:
+    """Busca los mejores hiperparametros con validacion cruzada sobre train.
+
+    Devuelve (modelo, parametros, cv_f1_macro_medio, cv_desviacion) donde la
+    media y la desviacion provienen de la MISMA validacion cruzada del grid
+    (scores por fold de la mejor combinacion).
+    """
     rejilla = rejillas_hiperparametros().get(nombre)
     base = definir_modelos()[nombre]["modelo"]
     if not rejilla:
-        return base, {}, float("nan")
+        return base, {}, float("nan"), float("nan")
     busqueda = GridSearchCV(
         base,
         rejilla,
@@ -165,10 +174,12 @@ def ajustar_hiperparametros(
         n_jobs=-1,
     )
     busqueda.fit(X_train, y_train)
+    cv_media = float(busqueda.best_score_)
+    cv_desv = float(busqueda.cv_results_["std_test_score"][busqueda.best_index_])
     LOG.info(
-        "  [grid] %s -> %s (cv_f1_macro=%.4f)", nombre, busqueda.best_params_, busqueda.best_score_
+        "  [grid] %s -> %s (cv_f1_macro=%.4f +/- %.4f)", nombre, busqueda.best_params_, cv_media, cv_desv
     )
-    return busqueda.best_estimator_, busqueda.best_params_, float(busqueda.best_score_)
+    return busqueda.best_estimator_, busqueda.best_params_, cv_media, cv_desv
 
 
 def _slug(nombre: str) -> str:
@@ -322,9 +333,12 @@ def entrenar(
         predicciones[nombre] = pred
         entrenados[nombre] = modelo
 
+    # El ganador se elige SOLO por validacion cruzada sobre train: nunca se
+    # desempata por el f1_macro del test (evita fuga de seleccion). Si hay
+    # empate en cv_f1_macro gana el modelo con menor variacion entre folds.
     metricas = (
         pd.DataFrame(resultados)
-        .sort_values(["cv_f1_macro", "f1_macro"], ascending=False)
+        .sort_values(["cv_f1_macro", "cv_desviacion"], ascending=[False, True])
         .reset_index(drop=True)
     )
     mejor = metricas.iloc[0]["modelo"]
@@ -334,7 +348,7 @@ def entrenar(
     )
 
     LOG.info("  ajustando hiperparametros del ganador con GridSearchCV...")
-    modelo_final, mejores_params, cv_ajustado = ajustar_hiperparametros(mejor, X_train, y_train)
+    modelo_final, mejores_params, cv_ajustado, cv_desviacion = ajustar_hiperparametros(mejor, X_train, y_train)
     modelo_final.fit(X_train, y_train)
     predicciones[mejor] = modelo_final.predict(X_test)
     entrenados[mejor] = modelo_final
@@ -344,6 +358,7 @@ def entrenar(
     )
     if mejores_params:
         metricas.loc[fila, "cv_f1_macro"] = round(cv_ajustado, 4)
+        metricas.loc[fila, "cv_desviacion"] = round(cv_desviacion, 4)
 
     asegurar_dir(MODELS)
     asegurar_dir(REPORTS)
@@ -358,16 +373,21 @@ def entrenar(
         pd.DataFrame(reporte).transpose()
         .reset_index().rename(columns={"index": "clase"})
     )
-    imp = importancia(entrenados[mejor], list(X_train.columns), X_test, y_test)
+    imp = importancia(entrenados[mejor], list(X_train.columns), X_train, y_train)
 
+    # Metricas finales sobre el modelo ya re-ajustado (post GridSearchCV): se
+    # recalculan accuracy, precision, recall, F1 y f1_weighted desde la misma
+    # prediccion para que metricas_modelos.csv no quede desactualizado.
     acc_final = accuracy_score(y_test, predicciones[mejor])
-    _, _, f_macro_final, _ = precision_recall_fscore_support(
+    p_macro_final, r_macro_final, f_macro_final, _ = precision_recall_fscore_support(
         y_test, predicciones[mejor], average="macro", zero_division=0
     )
     _, _, f_weighted_final, _ = precision_recall_fscore_support(
         y_test, predicciones[mejor], average="weighted", zero_division=0
     )
     metricas.loc[fila, "accuracy"] = round(float(acc_final), 4)
+    metricas.loc[fila, "precision_macro"] = round(float(p_macro_final), 4)
+    metricas.loc[fila, "recall_macro"] = round(float(r_macro_final), 4)
     metricas.loc[fila, "f1_macro"] = round(float(f_macro_final), 4)
     metricas.loc[fila, "f1_weighted"] = round(float(f_weighted_final), 4)
 
@@ -407,15 +427,57 @@ def entrenar(
 # --------------------------------------------------------------------------
 # Inferencia (modelo reutilizable)
 # --------------------------------------------------------------------------
+def _derivadas_t07(transformacion: dict) -> list[dict]:
+    """Devuelve los specs T07 a aplicar en inferencia (nombre/numerador/denominador),
+    en el orden de creacion del entrenamiento. Si la transformacion guardada no
+    trae derivadas se usan las conocidas (utils.DERIVADAS_T07)."""
+    derivadas = (transformacion or {}).get("derivadas")
+    fuente = derivadas if derivadas else DERIVADAS_T07
+    ordenadas = sorted(fuente, key=lambda s: (s or {}).get("orden", 0))
+    specs = []
+    for spec in ordenadas:
+        try:
+            specs.append(
+                {
+                    "nombre": str(spec["nombre"]),
+                    "numerador": str(spec["numerador"]),
+                    "denominador": str(spec["denominador"]),
+                }
+            )
+        except (KeyError, TypeError):
+            continue
+    return specs
+
+
+def _leer_transformacion() -> dict:
+    ruta = TRANSFORMACION_JSON
+    if not ruta.exists():
+        return {}
+    try:
+        return json.loads(ruta.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001 - artefacto corrupto no debe tumbar el entrenamiento
+        LOG.warning("  no se pudo leer %s (%s)", ruta, exc)
+        return {}
+
+
 def _guardar_predictor(modelo, nombre: str, X_train: pd.DataFrame) -> Path:
-    """Empaqueta el modelo ganador, el orden de variables y los parametros de
-    escalado (leidos de estandarizacion.json) en un unico artefacto."""
+    """Empaqueta el modelo ganador, el orden de variables, los parametros de
+    escalado (estandarizacion.json) y los metadatos de transformacion
+    (transformacion.json: limites de winsor, constantes y derivadas T07) en un
+    unico artefacto."""
     escalado = _leer_estandarizacion()
+    transformacion = _leer_transformacion()
+    if not transformacion:
+        LOG.warning(
+            "  falta %s; el predictor se guardara sin metadatos de transformacion",
+            TRANSFORMACION_JSON,
+        )
     paquete = {
         "modelo": modelo,
         "modelo_nombre": nombre,
         "features": list(X_train.columns),
         "escalado": escalado,
+        "transformacion": transformacion,
     }
     ruta = MODELS / "predictor.joblib"
     joblib.dump(paquete, ruta)
@@ -436,30 +498,99 @@ def cargar_predictor(ruta: Path | None = None) -> dict:
         raise FileNotFoundError(
             f"Falta {ruta.name}. Entrena primero:\n  python src/run_all.py --sin-descargar --solo etl ml"
         )
-    return joblib.load(ruta)
+    paquete = joblib.load(ruta)
+    requeridas = ("modelo", "features")
+    faltan = [k for k in requeridas if k not in paquete]
+    if faltan:
+        raise ValueError(f"{ruta.name} esta incompleto: faltan las claves {faltan}. Reentrena el modelo.")
+    return paquete
 
 
 def predecir(frame: pd.DataFrame, predictor: dict | None = None) -> pd.DataFrame:
-    """Aplica el modelo ganador a flujos crudos (sin escalar).
+    """Aplica el modelo ganador a flujos CRUDOS (sin escalar ni transformar).
 
-    Reutiliza los parametros de estandarizacion guardados (media/desviacion) y
-    luego el modelo. Devuelve el flujo con la clase predicha.
+    Replica el preprocesado del entrenamiento usando los parametros ajustados
+    SOLO con train, en el mismo orden: (a) crea las variables derivadas T07
+    que falten, (b) aplica winsor con los limites de train, (c) elimina las
+    columnas constantes detectadas en train (si existen), (d) estandariza con
+    media/desviacion de train, (e) reordena a los features exactos del modelo
+    y predice.
+
+    Las columnas de etiqueta (Label, label_raw, label), si existen, se
+    conservan sin tocar y no se usan como variables.
+
+    Raises:
+        KeyError: si falta alguna columna imprescindible; el mensaje la(s) lista.
+        ValueError: si tras el preprocesado alguna variable requerida contiene
+            valores no finitos (no se predice en silencio).
     """
     predictor = predictor or cargar_predictor()
-    escalado = predictor["escalado"]
-    media = pd.Series(escalado.get("media", {}))
-    desv = pd.Series(escalado.get("desviacion", {}))
+    transformacion = predictor.get("transformacion") or _leer_transformacion() or {}
+    if not transformacion:
+        LOG.warning(
+            "  sin metadatos de transformacion (falta %s): se crean las derivadas T07 "
+            "conocidas y NO se aplica winsor ni se eliminan constantes",
+            TRANSFORMACION_JSON,
+        )
+    escalado = predictor.get("escalado") or _leer_estandarizacion()
+    features = list(predictor["features"])
 
     datos = frame.copy()
+    datos.columns = [str(c).strip() for c in datos.columns]
+
+    derivadas = _derivadas_t07(transformacion)
+    limites = {
+        str(c): (float(lim[0]), float(lim[1]))
+        for c, lim in (transformacion.get("winsor_limites") or {}).items()
+    }
+    constantes = [str(c) for c in transformacion.get("columnas_constantes", [])]
+
+    # Columnas que deben ser numericas para el preprocesado -> coaccion numerica
+    columnas_num = set(features) | set(escalado.get("columnas", [])) | set(limites) | set(constantes)
+    for spec in derivadas:
+        columnas_num |= {spec["numerador"], spec["denominador"], spec["nombre"]}
+    for col in columnas_num:
+        if col in datos.columns:
+            datos[col] = pd.to_numeric(datos[col], errors="coerce")
+
+    # (a) crear las variables derivadas T07 que falten
+    for spec in derivadas:
+        if spec["nombre"] in datos.columns:
+            continue  # el CSV ya las trae: se reutilizan tal cual
+        if spec["numerador"] in datos.columns and spec["denominador"] in datos.columns:
+            datos[spec["nombre"]] = crear_derivada(datos, spec)
+
+    # (b) winsorizacion con los limites ajustados en TRAIN
+    for col, (bajo, alto) in limites.items():
+        if col in datos.columns:
+            datos[col] = datos[col].clip(lower=bajo, upper=alto)
+
+    # (c) eliminar las columnas constantes detectadas en TRAIN, si existen
+    presentes = [c for c in constantes if c in datos.columns]
+    if presentes:
+        datos = datos.drop(columns=presentes)
+
+    # (d) estandarizar con media/desviacion de TRAIN
+    media = pd.Series(escalado.get("media", {}))
+    desv = pd.Series(escalado.get("desviacion", {}))
     for col in escalado.get("columnas", []):
         if col in datos.columns and col in media.index and col in desv.index and desv[col] != 0:
             datos[col] = (datos[col].astype(float) - media[col]) / desv[col]
 
-    features = predictor["features"]
+    # (e) reordenar a los features exactos del modelo y predecir
     faltantes = [c for c in features if c not in datos.columns]
     if faltantes:
-        raise KeyError(f"Faltan variables requeridas por el modelo: {faltantes[:5]}...")
+        raise KeyError(
+            f"Faltan {len(faltantes)} columna(s) imprescindibles para la prediccion: "
+            + ", ".join(faltantes)
+        )
     X = datos[features].astype(float)
+    no_finitas = [c for c in X.columns if not np.isfinite(X[c].to_numpy(dtype=float)).all()]
+    if no_finitas:
+        raise ValueError(
+            f"Variables con valores no finitos tras el preprocesado: {no_finitas}. "
+            "Revisa los valores del CSV crudo (faltantes/infinitos)."
+        )
     pred = predictor["modelo"].predict(X)
     datos["label_predicho"] = pred
     return datos

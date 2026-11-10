@@ -28,7 +28,9 @@ fuentes de datos hasta la verificacion de integridad y la visualizacion.
              |                            NB, SVM)
              +------------------+------------------+
                                 |
-                       5. RESULTADOS (data/processed, data/reports)
+                       4c. INTEGRACION (ML+PNL) -> reporte_integrado.{md,json}
+                                 |
+                        5. RESULTADOS (data/processed, data/reports)
                                 |
                        6. TRAZABILIDAD (SHA-256 -> Blockchain)
                                 |
@@ -47,6 +49,8 @@ fuentes de datos hasta la verificacion de integridad y la visualizacion.
 4a. **PNL.** `pnl.py` procesa los textos: TF-IDF, sentimiento (VADER),
    entidades (IOC) y resumen/reporte.
 4b. **ML.** `ml.py` entrena varios modelos, los evalua y guarda el mejor.
+4c. **Integracion.** `integrar.py` combina las senales de ML y PNL en un
+    reporte con nivel de riesgo (BAJO/MEDIO/ALTO).
 5. **Resultados.** Datos procesados, metricas, figuras y evidencias en
    `data/processed/`, `data/reports/`, `data/figures/` y `models/`.
 6. **Trazabilidad.** `blockchain.py` calcula el SHA-256 de los artefactos clave
@@ -66,6 +70,7 @@ fuentes de datos hasta la verificacion de integridad y la visualizacion.
 | `etl_load.py` | Materializacion y validacion | `data/processed/*`, `data/reports/*` |
 | `ml.py` | Entrenamiento/evaluacion y prediccion | `models/*.joblib`, reportes y figuras de ML |
 | `pnl.py` | Analisis de texto | reportes y figuras de PNL, textos enriquecidos |
+| `integrar.py` | Integracion ML+PNL (nivel de riesgo) | `data/reports/reporte_integrado.{md,json}` |
 | `blockchain.py` | Registro y verificacion de integridad | `data/blockchain/cadena.json`, evidencia |
 | `run_all.py` | Orquestacion del pipeline | resumen de ejecucion |
 | `dashboard.py` | Visualizacion e interaccion | interfaz Streamlit |

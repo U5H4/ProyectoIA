@@ -34,12 +34,30 @@ def test_ip_invalida_se_descarta():
     assert iocs["ipv4"] == []
 
 
-def test_version_estilo_ip_se_descarta():
-    assert pnl._es_versionish("1.2.3.4") is True
-    assert pnl._es_versionish("10.2.3.4") is True
-    assert pnl._es_versionish("124.248.207.50") is False
+def test_version_estilo_ip_se_descarta_por_contexto():
+    # Una IPv4 sola no se descarta como "version"; solo si el contexto lo delata.
+    assert pnl._ip_valida("124.248.207.50") is True
     iocs = pnl.extraer_iocs("version 10.2.3.4 lanzada hoy")
     assert iocs["ipv4"] == []
+    iocs = pnl.extraer_iocs("el host 10.2.3.4 envio trafico sospechoso")
+    assert "10.2.3.4" in iocs["ipv4"]
+    iocs = pnl.extraer_iocs("DNS publico 8.8.8.8 usado por el atacante")
+    assert "8.8.8.8" in iocs["ipv4"]
+
+
+def test_ips_reservadas_se_descartan():
+    for ip in ("127.0.0.1", "0.0.0.0", "169.254.1.1", "224.0.0.1"):
+        iocs = pnl.extraer_iocs(f"beacon a {ip}")
+        assert iocs["ipv4"] == []
+    # RFC1918 se conservan (validas en incidentes internos)
+    assert "192.168.1.5" in pnl.extraer_iocs("host 192.168.1.5")["ipv4"]
+
+
+def test_iocs_desdefangueados_se_detectan():
+    texto = "CnC en hxxps://evil[.]example[.]com/payload y CVE-2021-44228 via actor"
+    iocs = pnl.extraer_iocs(texto)
+    assert any("evil.example.com" in u for u in iocs["url"])
+    assert "CVE-2021-44228" in iocs["cve"]
 
 
 def test_dominio_no_se_duplica_con_url_ni_email():
@@ -91,3 +109,18 @@ def test_terminos_clave_doc_devuelve_string():
     vectorizer, matriz = pnl.vectorizar(corpus)
     clave = pnl.terminos_clave_doc(matriz, vectorizer, 0)
     assert isinstance(clave, str) and "malware" in clave
+
+
+def test_desdefanguear_reflujo_pdf_con_espacios():
+    assert pnl._desdefanguear("github[. ]com") == "github.com"
+    assert pnl._desdefanguear("kentona[.su/x") == "kentona.su/x"
+    assert pnl._desdefanguear("user[at]corp[. ]com") == "user@corp.com"
+
+
+def test_iocs_desdefangueados_reflujo_pdf():
+    texto = "C2 en hxxp://45[. ]77[. ]60[. ]1/payload visitado"
+    iocs = pnl.extraer_iocs(texto)
+    assert any(u.startswith("http://45.77.60.1") for u in iocs["url"])
+    # la IP de la URL no se duplica como ipv4 suelto
+    aislado = pnl.extraer_iocs("beacon hacia 45[. ]77[. ]60[. ]1 detectado")
+    assert "45.77.60.1" in aislado["ipv4"]

@@ -136,9 +136,11 @@ python src/ml.py
   y evidencia en `data/reports/` (`metricas_modelos.csv`, `metricas_por_clase.csv`,
   `matriz_confusion.csv`, `importancia_variables.csv`, `ml_resumen.json`).
 - Graficos: `data/figures/comparacion_modelos.html`, `data/figures/matriz_confusion.html`.
-- **Inferencia:** `models/predictor.joblib` empaqueta el modelo ganador y la
-  estandarizacion (de `estandarizacion.json`); el dashboard permite subir un CSV
-  de flujos crudos y clasificarlos en vivo.
+- **Inferencia:** `models/predictor.joblib` empaqueta el modelo ganador, la
+  estandarización (`estandarizacion.json`) y la **transformacion completa**
+  (`transformacion.json`: límites winsor, constantes y derivadas T07 ajustados
+  solo con train). El dashboard clasifica flujos crudos y aplica el mismo
+  preprocesado que el entrenamiento.
 - **Hiperparametros:** el ganador se reajusta con `GridSearchCV` (F1-macro, CV=5).
 
 ## Reporte integrado (ML + PNL)
@@ -159,8 +161,9 @@ python src/pnl.py
 1. **Representacion del lenguaje** con TF-IDF (`data/reports/pnl_top_terminos.csv`).
 2. **Analisis de sentimiento** con VADER (`data/reports/pnl_sentimiento.csv`).
 3. **Reconocimiento de entidades (IOC)**: IPv4, dominios, URLs, correos, hashes,
-   CVEs y palabras clave de amenaza (`data/reports/pnl_iocs.csv`,
-   `data/reports/pnl_entidades.csv`).
+   CVEs y términos clave por documento (`data/reports/pnl_iocs.csv`,
+   `data/reports/pnl_entidades.csv`). Se desdefanguean los IOCs (hxxp/[.]) y se
+   excluyen IPv4 reservadas; un dominio dentro de una URL o correo no se cuenta.
 4. **Generacion de lenguaje** extractivo: resumen por documento y reporte
    narrativo (`data/reports/pnl_reporte.md`).
 
@@ -181,12 +184,14 @@ python src/blockchain.py --solo-verificar # valida la cadena existente sin recon
   Se justifica por que esos artefactos permiten demostrar que el resultado
   presentado no fue alterado.
 - Verificacion: recomputa cada hash y la cadena completa; prueba de alteracion
-  incluida. Antes de reconstruir, la cadena previa en disco se valida y se avisa
-  si ya no era integra.
-- El **dashboard verifica la cadena en vivo** (recalcula `es_valida()` sobre
-  `cadena.json`), no solo lee un CSV previo.
+  incluida. `python src/blockchain.py --solo-verificar` re-hashea los artefactos
+  registrados contra `cadena.json` y reporta OK/MODIFICADO/FALTANTE (no reconstruye
+  ni escribe nada). Antes de reconstruir, la cadena previa se archiva íntegra en
+  `data/blockchain/cadena_<UTC>_UTC.backup.json` y se valida.
+- El **dashboard verifica la cadena en vivo** (recalcula `es_valida()` y re-hashea
+  los artefactos registrados comparando contra `cadena.json`), no solo lee un CSV.
 - Salidas: `data/blockchain/cadena.json` y evidencia en
-  `data/reports/blockchain_{bloques,validacion,integridad,prueba_alteracion}.csv`.
+  `data/reports/blockchain_{bloques,validacion,prueba_alteracion}.csv`.
 
 ## Dashboard
 
@@ -201,10 +206,58 @@ streamlit run src/dashboard.py
 
 ## Fuentes de datos
 
+### Requisitos de hardware
+
+- CPU de 2+ núcleos (se usó un portátil corriente; la ETL completa tarda ~2–4 min).
+- 8 GB de RAM recomendados (CICIDS crudo ~2,8 M filas antes del muestreo).
+- ~500 MB–1 GB de disco para datos crudos, procesados y modelos.
+- Entorno con Python 3.10+ (probado en 3.12) y acceso a internet solo si se re-descarga (`--sin-descargar` evita la red).
+
+### Configuración (`src/config.py`)
+
+| Parámetro | Qué controla |
+|---|---|
+| `SEED = 20261007` | Reproducibilidad (muestreo, split, GridSearchCV) |
+| `TEST_SIZE = 0.30` | Partición estratificada train/test |
+| `CV_FOLDS = 5` | Validación cruzada del ganador |
+| `DEFAULT_MAX_PER_CLASS = 6000`, `DEFAULT_PER_FILE_CLASS_CAP = 2000` | Tope de muestreo por clase/archivo |
+| `MIN_REGISTROS_FLUJOS = 5000`, `MIN_REGISTROS_REPORTES = 300` | Mínimos del enunciado |
+| `IQR_FACTOR = 3.0` | Umbral winsor de valores atípicos (fit en TRAIN) |
+| `CTI_MIN_TEXT_LEN`, `CTI_MAX_CHARS`, `PNL_TOP_TERMINOS`, `PNL_RESUMEN_ORACIONES`, `PNL_MAX_CHARS_SENTIMIENTO` | PNL |
+| `LABEL_GROUPS`, `CICIDS_FILES` | Mapeo de clases y lista de archivos |
+
+### Problemas encontrados y soluciones
+
+- **Métricas ML optimistas por muestreo:** se balancea por submuestreo (cap por clase) ⇒ prevalencia no real
+  (CICIDS es ~80 % BENIGN). Se declaran limitaciones en `INFORME.md`; las clases Heartbleed (n=11) e
+  Infiltration (n=36) tienen soporte mínimo y sus métricas no son del orden, se entrena y reporta sobre el test estratificado.
+- **Fuga de datos eterna:** winsorización (T06), selección de constantes (T08) y escalado (T10) ajustan sus
+  parámetros SOLO con train; la inferencia replica ese pipeline exacto (`transformacion.json`).
+- **Inferencia incoherente con entrenamiento:** `predecir()` no creaba las derivadas T07 ni aplicaba winsor.
+  Ahora aplica: derivadas → winsor (train) → eliminar constantes → escalar → ordenar features, usando
+  `transformacion.json` y `estandarizacion.json`.
+- **IPs “version” descartadas por error:** la heurística “octetos ≤20 ⇒ versión” borraba 8.8.8.8. Se sustituye por
+  exclusión de reservadas (0/127/169.254/multicast) y "versión" solo por contexto cercano.
+- **IOCs duplicados/sobreconteo:** dominio dentro de URL/email se excluye; el corpus se **desdefanguea** (hxxp/[.]) antes de extraer.
+- **CTI duplicado:** 4 textos idénticos aparecían tras truncar a 20 000 chars ⇒ deduplicados **después** del truncado (T04); PNL parte de 974 únicos.
+- **Bloque "íntegro" tautológico:** `blockchain_integridad.csv` comparaba archivos consigo mismos. Se elimina: el dashboard y `--solo-verificar` re-hashean en vivo contra `cadena.json`.
+- **Blockchain se auto-sobrescribía sin rastro:** cada reconstrucción archiva la cadena previa íntegra en `cadena_<UTC>.backup.json`; si falta algún artefacto, no guarda la cadena y falla.
+- **Ejecución silenciosa de integrales vacías:** `construir_cadena` oculta ahora los artefactos omitidos y `ejecutar` aborta sin escribir la cadena.
+- **Selección sesgada:** antes se desempataba por F1 de test; ahora `cv_f1_macro` + `cv_desviacion`.
+- **Artefactos no sincronizados con artefactos de código:** tras cada cambio se re-ejecuta el pipeline completo.
+
+## Fuentes de datos
+
 | Fuente | Uso | Enlace |
 |---|---|---|
 | CICIDS2017 (MachineLearningCVE) | ML: clasificacion de flujos | https://www.unb.ca/cic/datasets/ids-2017.html |
 | Cyber Threat Intelligence Reports (guychuk) | PNL: reportes de amenazas | https://huggingface.co/datasets/guychuk/cyber-threat-intelligence-reports |
+
+### Condiciones de uso de las fuentes
+
+- **CICIDS2017 (UNB, Sharafaldin et al., ICISSP 2018):** uso académico/investigación; cite a UNB y a los autores; no redistribuya el dataset. En la demo se usa el espejo `bvsam/cic-ids-2017` por comodidad de descarga; para publicar/modelos, descargue desde UNB.
+- **CTI Reports (guychuk, HuggingFace):** no hay una licencia clara publicada en el espejo; solo uso académico/demostración. No redistribuya; sustituya la fuente si necesita una licencia explícita.
+- Ambos conjuntos son datos públicos sin datos personales identificables.
 
 ## Pruebas
 
@@ -219,7 +272,7 @@ proyectoIA/
 ├── data/
 │   ├── raw/            Datos crudos descargados (no versionado)
 │   ├── processed/      Datos limpios y divididos (no versionado)
-│   ├── reports/        Evidencia auditable del ETL (no versionado)
+│   ├── reports/        Evidencia auditable (ETL, ML, PNL, Integracion, Blockchain; no versionado)
 │   ├── figures/        Graficos generados (no versionado)
 │   └── blockchain/     Cadena de bloques (no versionado)
 ├── src/

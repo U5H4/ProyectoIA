@@ -23,11 +23,18 @@ cualquier decision ajustada a los datos.
 
 Sobre los reportes de texto se aplica limpieza de texto (mismo tracker).
 
+Ademas de `data/processed/estandarizacion.json` (media/desviacion), esta etapa
+persiste en `data/processed/transformacion.json` los parametros del pipeline
+ajustados con train que la inferencia necesita: limites de winsorizacion,
+columnas constantes eliminadas y especificacion/orden de las derivadas T07.
+
 Uso:
     python src/etl_transform.py
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -46,7 +53,7 @@ from config import (
     TARGET_COLUMN,
     TEST_SIZE,
 )
-from utils import LOG, CalidadTracker, titulo
+from utils import LOG, DERIVADAS_T07, TRANSFORMACION_JSON, CalidadTracker, asegurar_dir, crear_derivada, titulo
 
 TABLA_FLUJOS = "flujos_red"
 TABLA_REPORTES = "reportes_cti"
@@ -110,6 +117,60 @@ def _aplicar_limites_winsor(frame: pd.DataFrame, limites: dict) -> int:
         afectados += int(fuera.sum())
         frame[col] = serie.clip(lower=bajo, upper=alto)
     return afectados
+
+
+# --------------------------------------------------------------------------
+# Metadatos de transformacion (para inferencia identica al entrenamiento)
+# --------------------------------------------------------------------------
+def construir_metadatos_transformacion(d: dict) -> dict:
+    """Empaqueta (sin escribir nada) los parametros ajustados SOLO con train.
+
+    Incluye los limites de winsorizacion, las columnas constantes eliminadas y
+    la especificacion/orden de las variables derivadas T07. ml.predecir() los
+    reutiliza para que un CSV crudo reciba exactamente el mismo preprocesado.
+    """
+    derivadas = []
+    for orden, spec in enumerate(DERIVADAS_T07):
+        derivadas.append(
+            {
+                "nombre": spec["nombre"],
+                "numerador": spec["numerador"],
+                "denominador": spec["denominador"],
+                "formula": (
+                    f"{spec['numerador']} / {spec['denominador']} "
+                    "(denominador 0 -> 0.0; inf -> 0.0)"
+                ),
+                "orden": orden,
+            }
+        )
+    limites = d.get("winsor_limites", {})
+    return {
+        "version": 1,
+        "factor_winsor": IQR_FACTOR,
+        "winsor_limites": {
+            str(col): [float(bajo), float(alto)] for col, (bajo, alto) in limites.items()
+        },
+        "columnas_constantes": [str(c) for c in d.get("columnas_constantes", [])],
+        "derivadas": derivadas,
+        "columnas_escalado": list(d.get("escalado", {}).get("columnas", [])),
+    }
+
+
+def guardar_metadatos_transformacion(resultado: dict, ruta=None) -> Path:
+    """Escribe los metadatos de transformacion en data/processed/transformacion.json.
+
+    Se ejecuta dentro de transformar() para que el pipeline completo los deje
+    junto a estandarizacion.json. Los tests pueden redirigir `ruta`.
+    """
+    import json
+
+    destino = Path(ruta) if ruta is not None else TRANSFORMACION_JSON
+    metadatos = resultado.get("transformacion") or construir_metadatos_transformacion(resultado)
+    resultado["transformacion"] = metadatos
+    asegurar_dir(destino.parent)
+    destino.write_text(json.dumps(metadatos, indent=2, ensure_ascii=False), encoding="utf-8")
+    LOG.info("[ok] metadatos de transformacion en %s", destino)
+    return destino
 
 
 # --------------------------------------------------------------------------
@@ -215,15 +276,11 @@ def t07_derivadas(d: dict, t: CalidadTracker) -> None:
     antes = len(frame)
     nuevas = []
 
-    def _ratio(num: str, den: str, nombre: str) -> None:
+    for spec in DERIVADAS_T07:
+        num, den, nombre = spec["numerador"], spec["denominador"], spec["nombre"]
         if num in frame.columns and den in frame.columns:
-            frame[nombre] = (frame[num] / frame[den].replace(0, np.nan)).fillna(0.0)
+            frame[nombre] = crear_derivada(frame, spec)
             nuevas.append(nombre)
-
-    _ratio("Total Length of Fwd Packets", "Total Fwd Packets", "bytes_por_paquete_fwd")
-    _ratio("Total Backward Packets", "Total Fwd Packets", "ratio_paquetes_bwd_fwd")
-    _ratio("SYN Flag Count", "Total Fwd Packets", "ratio_flag_syn")
-    _ratio("Total Length of Fwd Packets", "Flow Duration", "tasa_bytes_fwd")
 
     d[TABLA_FLUJOS] = frame
     t.registrar(
@@ -332,6 +389,13 @@ def limpiar_reportes(d: dict, t: CalidadTracker) -> None:
         f"len(text) > {CTI_MIN_TEXT_LEN}",
     )
     limpio["text"] = limpio["text"].str.slice(0, CTI_MAX_CHARS)
+    antes_trunc = len(limpio)
+    limpio = limpio.drop_duplicates(subset=["text"]).reset_index(drop=True)
+    t.registrar(
+        4, "Eliminacion de duplicados tras truncado", TABLA_REPORTES, antes_trunc, len(limpio),
+        antes_trunc - len(limpio), "textos iguales tras cortar a CTI_MAX_CHARS",
+        "drop_duplicates('text')",
+    )
     d[TABLA_REPORTES] = limpio
     t.registrar(
         3, "Correccion de tipo / truncado", TABLA_REPORTES, len(limpio), len(limpio),
@@ -366,6 +430,7 @@ def transformar(
     t06_atipicos(d, tracker)
     t08_seleccion(d, tracker)
     t10_escalado(d, tracker)
+    guardar_metadatos_transformacion(d)
     d[TABLA_FLUJOS] = _recomponer_clean(d)
     limpiar_reportes(d, tracker)
     return d, tracker

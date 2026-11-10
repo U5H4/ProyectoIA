@@ -21,7 +21,7 @@ from config import PROCESSED, REPORTS
 from utils import LOG, asegurar_dir, titulo
 
 REPORTE_ML = REPORTS / "ml_resumen.json"
-REPORTE_PNL = REPORTES_PNL = REPORTS / "pnl_resumen.csv"
+REPORTE_PNL = REPORTS / "pnl_resumen.csv"
 REPORTE_OUT = REPORTS / "reporte_integrado.md"
 REPORTE_JSON = REPORTS / "reporte_integrado.json"
 
@@ -76,8 +76,26 @@ def integrar() -> dict:
     docs = total_iocs = pct_neg = None
     if pnl is not None and not pnl.empty:
         kpis = dict(zip(pnl["indicador"], pnl["valor"]))
-        docs = kpis.get("Documentos analizados")
-        total_iocs = kpis.get("Total de IOCs")
+
+        import math
+
+        def _entero(valor):
+            """Coerce a int desde el CSV (acepta "33844", "33844.0"); None si no aplica."""
+            if valor is None:
+                return None
+            if isinstance(valor, float) and math.isnan(valor):
+                return None
+            texto = str(valor).strip()
+            try:
+                numero = float(texto)
+            except ValueError:
+                return None
+            return int(numero) if math.isfinite(numero) else None
+
+        docs = _entero(kpis.get("Documentos analizados"))
+        # El nombre historico del KPI es "Total de IOCs" (ver pnl_resumen.csv);
+        # se acepta el nombre intermedio como respaldo por compatibilidad.
+        total_iocs = _entero(kpis.get("Total de IOCs", kpis.get("Total de IOCs (ocurrencias)")))
         pct_neg = kpis.get("% negativo")
         try:
             pct_neg = float(str(pct_neg).rstrip("%")) / 100.0

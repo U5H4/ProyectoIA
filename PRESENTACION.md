@@ -25,7 +25,7 @@ Fuentes (CICIDS2017 + CTI) → ETL → ML ∥ PNL → Integración → Resultado
 ## DIAPOSITIVA 5: DATOS UTILIZADOS
 - CICIDS2017 (UNB, Sharafaldin et al. 2018) - bvsam/cic-ids-2017 (parquet)
 - CTI Reports - guychuk/cyber-threat-intelligence-reports
-- Tras ETL: 19.815 flujos, 74 features | 978 reportes CTI
+- Tras ETL: 19.815 flujos, 72 features | 974 reportes CTI
 
 ## DIAPOSITIVA 6: PROCESAMIENTO REALIZADO (ETL)
 - Descarga, consolidación, limpieza (NaN/Inf), normalización etiquetas
@@ -41,16 +41,16 @@ Fuentes (CICIDS2017 + CTI) → ETL → ML ∥ PNL → Integración → Resultado
 
 ## DIAPOSITIVA 8: PROCESAMIENTO DE LENGUAJE NATURAL
 - TF-IDF (términos relevantes)
-- VADER (sentimiento)
-- IOCs/Entidades (IPs, dominios, URLs, hashes...) → 33.844 IOCs, 405 CVEs, 1.838 IPs válidas
-- Validación de IPs + exclusión mutua (sin doble conteo)
+- VADER (sentimiento) — proxy léxico
+- IOCs (desdefangueados): 38.759 IOCs, 405 CVEs, 2.373 IPs distintas, 906/974 docs con ≥1 IOC
+- IPv4 reservadas descartadas + "versiones" solo por contexto + exclusión mutua
 - Resumen extractivo + pnl_reporte.md
 
 ## DIAPOSITIVA 9: BLOCKCHAIN
 - Cadena SHA-256 propia
 - 8 bloques, cadena_valida = True
 - Registro de artefactos (incluye reporte integrado ML+PNL) + verificación + detección alteración
-- Verificación en vivo en el dashboard
+- Verificación en vivo en el dashboard (OK/MODIFICADO/FALTANTE) y `--solo-verificar` offline con re-hash
 - Evidencias: cadena.json, CSVs
 
 ## DIAPOSITIVA 10: DASHBOARD
@@ -59,17 +59,17 @@ Fuentes (CICIDS2017 + CTI) → ETL → ML ∥ PNL → Integración → Resultado
 - AppTest: 5 pestañas, sin excepciones
 
 ## DIAPOSITIVA 11: RESULTADOS
-- ETL OK (19.815 / 978)
+- ETL OK (19.815 / 974)
 - ML excelente (F1-macro 0.9899, RF ajustado)
 - PNL funcional (4 features, KPIs reales)
 - Integración ML+PNL: nivel de riesgo ALTO
-- Blockchain íntegro (8 bloques)
-- 46/46 tests OK
+- Blockchain íntegro (8 bloques, artefactos verificados en vivo 7/7)
+- 64/64 tests OK
 
 ## DIAPOSITIVA 12: DEMOSTRACIÓN
 - python src/run_all.py --sin-descargar --solo etl ml pnl integrar blockchain
 - streamlit run src/dashboard.py
-- Verificación tests: python -m pytest -q
+- Verificación tests: python -m pytest tests -q
 
 ## DIAPOSITIVA 13: CONCLUSIONES
 - Integración coherente y funcional

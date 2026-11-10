@@ -6,9 +6,37 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
-from config import LOGS, REPORTS
+from config import LOGS, PROCESSED, REPORTS
+
+# Ruta donde la ETL persiste los metadatos de transformacion (fit sobre train)
+# que la inferencia necesita para ser identica al entrenamiento.
+TRANSFORMACION_JSON = PROCESSED / "transformacion.json"
+
+# Especificacion de las variables derivadas T07 (nombres, fuentes y orden de
+# creacion). Unica fuente de verdad compartida por la ETL (src/etl_transform.py)
+# y por la inferencia (src/ml.py).
+DERIVADAS_T07 = [
+    {"nombre": "bytes_por_paquete_fwd", "numerador": "Total Length of Fwd Packets", "denominador": "Total Fwd Packets"},
+    {"nombre": "ratio_paquetes_bwd_fwd", "numerador": "Total Backward Packets", "denominador": "Total Fwd Packets"},
+    {"nombre": "ratio_flag_syn", "numerador": "SYN Flag Count", "denominador": "Total Fwd Packets"},
+    {"nombre": "tasa_bytes_fwd", "numerador": "Total Length of Fwd Packets", "denominador": "Flow Duration"},
+]
+
+
+def crear_derivada(frame: pd.DataFrame, spec: dict) -> pd.Series:
+    """Formula T07 compartida ETL<->inferencia: numerador / denominador.
+
+    Los denominadores iguales a 0 (y cualquier inf resultante) se tratan como 0
+    para que el resultado sea siempre finito.
+    """
+    serie = (
+        frame[spec["numerador"]].astype(float)
+        / frame[spec["denominador"]].astype(float).replace(0, np.nan)
+    )
+    return serie.replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
 # --------------------------------------------------------------------------
 # Logging

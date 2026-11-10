@@ -41,7 +41,7 @@ Diseñar y desarrollar un prototipo funcional de un Sistema Inteligente de Anál
 
 ## 8. ALCANCE Y LIMITACIONES
 
-**Alcance:** Prototipo funcional local que procesa 19.815 flujos y 978 reportes CTI, compara 6 modelos, enriquece texto, registra hashes en cadena de bloques y visualiza resultados.
+**Alcance:** Prototipo funcional local que procesa 19.815 flujos y 974 reportes CTI, compara 6 modelos, enriquece texto, registra hashes en cadena de bloques y visualiza resultados.
 
 **Limitaciones:**
 
@@ -56,14 +56,16 @@ Analistas de SOC, investigadores en ciberseguridad, docentes/estudiantes para de
 
 ## 10. DESCRIPCIÓN GENERAL DE LA SOLUCIÓN
 
-Pipeline modular: descargar → ETL → ML → PNL → Integración → Blockchain → Visualización (Dashboard). Reproducible con `python src/run_all.py`, probado (46/46 tests).
+Pipeline modular: descargar → ETL → ML → PNL → Integración → Blockchain → Visualización (Dashboard). Reproducible con `python src/run_all.py`, probado (64/64 tests).
 
 ## 11. FUENTES DE DATOS
 
 - **CICIDS2017:** Canadian Institute for Cybersecurity (UNB), Sharafaldin et al. (ICISSP 2018). Oficial: https://www.unb.ca/cic/datasets/ids-2017.html. Mirror parquet: https://huggingface.co/datasets/bvsam/cic-ids-2017
-- **CTI Reports:** https://huggingface.co/datasets/guychuk/cyber-threat-intelligence-reports
+- **CTI Reports:** https://huggingface.co/datasets/guychuk/cyber-threat-intelligence-reports (sin licencia clara; solo uso académico/demostración)
 
-**Datos finales:** 19.815 flujos (74 features), 978 reportes CTI.
+**Condiciones de uso:** CICIDS2017 (UNB) es para investigación/académica con cita a UNB/Sharafaldin et al.; el espejo `bvsam/cic-ids-2017` se usa solo por conveniencia de descarga. El CTI Reports no publica licencia explícita; se restringe a demostración académica. No hay datos personales identificables.
+
+**Datos finales:** 19.815 flujos (72 variables predictoras), 974 reportes CTI.
 
 ## 12. DATASET: DESCRIPCIÓN, TRATAMIENTO Y PROCESADO
 
@@ -71,7 +73,7 @@ Pipeline modular: descargar → ETL → ML → PNL → Integración → Blockcha
 
 **Tratamiento ETL:** validación de columnas, conversión de tipos, eliminación NaN/Inf, normalización de etiquetas (unificación), filtrado, estandarización, splits train/test (estratificado).
 
-**Dataset procesado:** flujos_clean.parquet (19.815 filas, 74 columnas), reportes_clean.parquet (978), reportes_enriquecidos.parquet, predicciones_test.parquet.
+**Dataset procesado:** flujos_clean.parquet (19.815 filas, 72 predictoras), reportes_clean.parquet (974), reportes_enriquecidos.parquet, predicciones_test.parquet.
 
 **División:** train/test estratificado 70/30 (13.870 / 5.945). Estandarización guardada en estandarizacion.json.
 
@@ -87,18 +89,18 @@ Pipeline modular: descargar → ETL → ML → PNL → Integración → Blockcha
 - **Ajuste de hiperparámetros:** GridSearchCV (F1-macro, CV=5) → `{max_depth: 20, n_estimators: 300}`.
 - **Métricas (test):** F1-macro = 0.9899, Accuracy = 0.9933, F1-weighted = 0.9933.
 - **CV F1-macro:** 0.9780, coherente con el resultado de test.
-- **Inferencia:** `models/predictor.joblib` empaqueta el modelo ganador y la estandarización; el dashboard clasifica flujos crudos subidos por el usuario.
+- **Inferencia:** `models/predictor.joblib` empaqueta el modelo ganador, la estandarización (`estandarizacion.json`) y la transformación completa (`transformacion.json`: límites winsor, constantes y derivadas T07, ajustados solo con train). El dashboard clasifica flujos crudos aplicando exactamente el mismo preprocesado que el entrenamiento.
 - **Evidencias:** models/modelo_mejor.joblib, data/reports/ml_resumen.json, figuras comparacion_modelos.html, matriz_confusion.html, predicciones_test.parquet.
 
 ## 14. PROCESAMIENTO DE LENGUAJE NATURAL (PNL)
 
-**Textos:** reportes CTI (978).
+**Textos:** reportes CTI (974).
 
 **Funcionalidades implementadas (>=3):**
 
 - **Representación:** TF-IDF (top términos relevantes).
 - **Análisis de sentimiento:** VADER (negativo/neutral/positivo).
-- **Reconocimiento de entidades/IOCs:** IPs, dominios/subdominios, URLs, hashes, emails, CVEs y palabras clave. Se validan las IPv4 (se descartan versiones tipo 10.2.3.4) y se evita el doble conteo (un dominio incluido en una URL o email no se cuenta aparte). KPIs calculados sobre todos los documentos: 33.844 IOCs, 405 CVEs distintos, 3.490 dominios distintos, 1.838 IPs válidas distintas.
+- **Reconocimiento de entidades/IOCs:** IPv4, dominios/subdominios, URLs, hashes (MD5/SHA1/SHA256), emails, CVEs y términos clave por documento. Los textos se **desdefanguean antes de extraer** (hxxp→http, `[.]→.`, etc.), las IPv4 reservadas (0/127/multicast/enlace local) se descartan, las que son "versiones" solo se tratan como tales por contexto cercano (version|v1.|release|build…), y se evita el doble conteo (dominio incluido en una URL/email no se cuenta aparte). KPIs sobre todo el corpus: **38.759 IOCs (ocurrencias)**, 27.261 distintos (sumando por tipo), **405 CVEs distintos**, **5.912 dominios distintos**, **2.373 IPs distintas**, 7.595 URLs distintas, 10.840 hashes distintos, 136 correos distintos, 906/974 documentos con ≥1 IOC (93,0 %).
 - **Generación de lenguaje natural:** Resumen extractivo por reporte + reporte global (pnl_reporte.md).
 
 **Evidencias:** data/processed/reportes_enriquecidos.parquet, pnl_*.csv, figuras pnl_top_terminos.html, pnl_sentimiento.html, data/reports/pnl_reporte.md.
@@ -107,14 +109,13 @@ Pipeline modular: descargar → ETL → ML → PNL → Integración → Blockcha
 
 - **Implementación:** Cadena propia con SHA-256 (sin red comercial).
 - **Campos:** indice, timestamp, datos, hash_previo, hash.
-- **Información registrada:** dataset limpio, reportes enriquecidos, modelo ML, predictor de inferencia, métricas ML, reporte PNL y reporte integrado ML+PNL (7 artefactos + bloque génesis = 8 bloques).
-- **Verificación:** recalcula cada hash y el encadenamiento; incluye prueba de alteración y comprobación de integridad de los archivos en disco (todos INTACTO). El modo `--solo-verificar` valida la cadena existente sin reconstruirla.
-- **Verificación en vivo en el dashboard:** la pestaña Blockchain carga `cadena.json`, recalcula `es_valida()` y detecta si el archivo fue modificado (no solo lee un CSV previo).
-- **Evidencias:** data/blockchain/cadena.json, blockchain_bloques.csv, blockchain_validacion.csv, blockchain_integridad.csv, blockchain_prueba_alteracion.csv.
+- **Información registrada:** dataset limpio, reportes enriquecidos, modelo ML, predictor de inferencia, métricas ML, reporte PNL y reporte integrado ML+PNL (7 artefactos + bloque génesis = 8 bloques). La cadena previa se **archiva íntegra** antes de cada reconstrucción.
+- **Verificación:** recalcula cada hash y el encadenamiento; `--solo-verificar` re-hashea los artefactos registrados contra `cadena.json` y reporta OK/MODIFICADO/FALTANTE sin reconstruir. El dashboard carga `cadena.json` y recalcula la validez de la cadena **y la integridad de los artefactos** en vivo (no solo lee un CSV previo).
+- **Evidencias:** data/blockchain/cadena.json, blockchain_bloques.csv, blockchain_validacion.csv, blockchain_prueba_alteracion.csv.
 
 ## 16. ARQUITECTURA DEL SISTEMA
 
-Capas: (1) Ingesta (HuggingFace), (2) ETL (extract/transform/load), (3) Analítica (ML y PNL en paralelo), (4) Trazabilidad (Blockchain), (5) Presentación (Dashboard Streamlit). El orquestador `src/run_all.py` encadena las etapas y detiene el pipeline ante cualquier fallo.
+Capas: (1) Ingesta (HuggingFace), (2) ETL (extract/transform/load), (3) Analítica (ML y PNL en paralelo), (4) Integración (reporte ML+PNL con nivel de riesgo), (5) Trazabilidad (Blockchain), (6) Presentación (Dashboard Streamlit). El orquestador `src/run_all.py` encadena las etapas y detiene el pipeline ante cualquier fallo.
 
 ## 17. DASHBOARD
 
@@ -122,12 +123,12 @@ Streamlit con 5 pestañas: Resumen, Datos (ETL), Machine Learning, PNL y Blockch
 
 ## 18. RESULTADOS
 
-- ETL: 19.815 flujos y 978 reportes (cumple mínimos 5.000 / 300).
+- ETL: 19.815 flujos y 974 reportes (cumple mínimos 5.000 / 300).
 - ML: Random Forest ajustado, F1-macro 0.9899, Accuracy 0.9933 (CV 0.9780).
-- PNL: 4 funcionalidades, 33.844 IOCs y KPIs reales sobre todo el corpus.
+- PNL: 4 funcionalidades, 38.759 IOCs (ocurrencias) y KPIs reales sobre todo el corpus (5.912 dominios, 2.373 IPs, 405 CVEs, 906/974 documentos con ≥1 IOC).
 - Integración: reporte ML+PNL con nivel de riesgo global (ALTO).
-- Blockchain: 8 bloques, `cadena_valida=True`, artefactos INTACTOS.
-- Pruebas: 46/46 en verde.
+- Blockchain: 8 bloques, `cadena_valida=True`, artefactos verificados en vivo (7/7 OK).
+- Pruebas: 64/64 en verde.
 
 ## 19. CONCLUSIONES
 

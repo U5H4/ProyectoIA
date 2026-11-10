@@ -25,7 +25,7 @@ import streamlit as st
 RAIZ = Path(__file__).resolve().parent
 sys.path.insert(0, str(RAIZ))
 
-from blockchain import Cadena  # noqa: E402
+from blockchain import Cadena, comprobar_integridad_archivos  # noqa: E402
 from config import BLOCKCHAIN_JSON, FIGURES, MODELS, PROCESSED, REPORTS  # noqa: E402
 from ml import cargar_predictor, predecir  # noqa: E402
 
@@ -289,34 +289,63 @@ with tabs[3]:
 # Blockchain
 # --------------------------------------------------------------------------
 with tabs[4]:
-    st.subheader("Estado de la cadena")
-    bloques = leer_csv(str(REPORTS / "blockchain_bloques.csv"))
+    st.subheader("Estado de la cadena (verificacion en vivo)")
+
+    cadena_live = None
     veredicto = None
     if BLOCKCHAIN_JSON.exists():
         try:
-            _cadena = Cadena.cargar()
-            _ok, _errores = _cadena.es_valida()
-            veredicto = (_ok, _errores, len(_cadena.bloques))
+            cadena_live = Cadena.cargar()
+            _ok, _errores = cadena_live.es_valida()
+            veredicto = (_ok, _errores, len(cadena_live.bloques))
         except Exception as exc:  # noqa: BLE001
             veredicto = (False, [f"No se pudo leer {BLOCKCHAIN_JSON.name}: {exc}"], 0)
 
-    if bloques is not None:
-        if veredicto is not None:
-            _ok, _errores, _n = veredicto
-            if _ok:
-                st.success(f"Cadena valida: {_n} bloques, sin alteraciones (verificado en vivo desde {BLOCKCHAIN_JSON.name}).")
-            else:
-                st.error("La cadena NO es valida. Errores: " + "; ".join(_errores))
+    if veredicto is not None:
+        _ok, _errores, _n = veredicto
+        if _ok:
+            st.success(f"Cadena valida: {_n} bloques, sin alteraciones (verificado en vivo desde {BLOCKCHAIN_JSON.name}).")
         else:
-            st.warning(f"No existe {BLOCKCHAIN_JSON.name}: se muestra el ultimo reporte guardado.")
-        st.dataframe(bloques, width="stretch")
+            st.error("La cadena NO es valida. Errores: " + "; ".join(_errores))
     else:
-        falta(REPORTS / "blockchain_bloques.csv")
+        st.warning(f"No existe {BLOCKCHAIN_JSON.name}. Ejecuta `python src/run_all.py --solo blockchain` para generarla.")
 
-    integridad = leer_csv(str(REPORTS / "blockchain_integridad.csv"))
-    if integridad is not None:
-        st.markdown("**Integridad de los archivos en disco**")
-        st.dataframe(integridad, width="stretch")
+    bloques_csv = None
+    if cadena_live is not None:
+        st.dataframe(cadena_live.a_dataframe(), width="stretch")
+    else:
+        bloques_csv = leer_csv(str(REPORTS / "blockchain_bloques.csv"))
+        if bloques_csv is not None:
+            st.warning(f"No existe {BLOCKCHAIN_JSON.name}: se muestra el ultimo reporte guardado.")
+            st.dataframe(bloques_csv, width="stretch")
+        else:
+            falta(BLOCKCHAIN_JSON)
+
+    if cadena_live is not None:
+        st.markdown("**Integridad de los artefactos en disco (verificacion en vivo)**")
+        integridad = comprobar_integridad_archivos(cadena_live)
+        if integridad.empty:
+            st.info("La cadena no registra artefactos de archivo.")
+        else:
+            vista = integridad.copy()
+            vista["sha256_registrado"] = vista["sha256_registrado"].str.slice(0, 16) + "…"
+            mascara = vista["sha256_actual"] != "-"
+            vista.loc[mascara, "sha256_actual"] = vista.loc[mascara, "sha256_actual"].str.slice(0, 16) + "…"
+            st.dataframe(vista, width="stretch", hide_index=True)
+            n_ok = int((integridad["estado"] == "OK").sum())
+            n_mod = int((integridad["estado"] == "MODIFICADO").sum())
+            n_falt = int((integridad["estado"] == "FALTANTE").sum())
+            total = len(integridad)
+            if n_mod == 0 and n_falt == 0:
+                st.success(
+                    f"Integridad global: OK — {n_ok}/{total} artefactos coinciden con el SHA-256 "
+                    "registrado en cadena.json (verificado en vivo)."
+                )
+            else:
+                st.error(
+                    f"Integridad global: FALLO — OK: {n_ok}, MODIFICADO: {n_mod}, "
+                    f"FALTANTE: {n_falt} de {total} artefactos."
+                )
 
     alteracion = leer_csv(str(REPORTS / "blockchain_prueba_alteracion.csv"))
     if alteracion is not None:
@@ -326,12 +355,22 @@ with tabs[4]:
     st.subheader("Verificacion de un archivo")
     st.caption("Sube un archivo y se calculara su SHA-256 para compararlo con el registrado.")
     archivo = st.file_uploader("Archivo a verificar")
-    if archivo is not None and bloques is not None:
+    if archivo is not None:
         sha = hashlib.sha256(archivo.getvalue()).hexdigest()
         st.write(f"SHA-256 calculado: `{sha}`")
-        coincide = bloques[bloques["sha256"] == sha]
-        if not coincide.empty:
-            st.success(f"El hash coincide con el bloque registrado: {coincide.iloc[0]['archivo']}")
+        registrados: dict[str, str] = {}
+        if cadena_live is not None:
+            for _b in cadena_live.bloques:
+                if _b.datos.get("sha256"):
+                    registrados[_b.datos["sha256"]] = _b.datos.get("archivo", "bloque sin nombre")
+        elif bloques_csv is not None:
+            for _, _fila in bloques_csv.iterrows():
+                _sha = _fila.get("sha256")
+                if isinstance(_sha, str) and _sha:
+                    registrados[_sha] = _fila.get("archivo", "bloque sin nombre")
+        coincide = registrados.get(sha)
+        if coincide:
+            st.success(f"El hash coincide con el bloque registrado: {coincide}")
         else:
             st.error("El hash NO coincide con ningun bloque registrado (informacion modificada o no registrada).")
 

@@ -8,6 +8,7 @@ Uso:
     python src/run_all.py --sin-descargar  # reutiliza data/raw ya descargado
     python src/run_all.py --solo ml pnl
     python src/run_all.py --con-tests
+    python src/run_all.py --reconstruir-forzadamente  # fuerza reconstruir Blockchain
 """
 
 from __future__ import annotations
@@ -25,6 +26,8 @@ import pandas as pd
 
 RAIZ = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+_RECONSTRUIR_FORZADAMENTE = False
 
 from config import ALL_DIRS  # noqa: E402
 from utils import LOG, asegurar_dir, tabla, titulo  # noqa: E402
@@ -85,8 +88,8 @@ def etapa_integrar() -> int:
 def etapa_blockchain() -> int:
     from blockchain import ejecutar
 
-    ejecutar()
-    return 0
+    resultado = ejecutar(reconstruir_forzadamente=_RECONSTRUIR_FORZADAMENTE)
+    return 0 if resultado.get("ok") else 1
 
 
 def etapa_tests() -> int:
@@ -146,12 +149,21 @@ def ejecutar(claves: list[str]) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global _RECONSTRUIR_FORZADAMENTE
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--listar", action="store_true", help="Lista las etapas y sale.")
     parser.add_argument("--solo", nargs="+", default=None, help="Ejecuta solo estas etapas.")
     parser.add_argument("--sin-descargar", action="store_true", help="Omite la etapa de descarga.")
     parser.add_argument("--con-tests", action="store_true", help="Anade la suite de pruebas.")
+    parser.add_argument(
+        "--reconstruir-forzadamente",
+        action="store_true",
+        help="Etapa Blockchain: permite reconstruir aunque la cadena previa en disco sea "
+        "invalida (la previa se archiva siempre antes).",
+    )
     args = parser.parse_args(argv)
+    _RECONSTRUIR_FORZADAMENTE = args.reconstruir_forzadamente
 
     if args.listar:
         filas = [

@@ -44,7 +44,7 @@ python src/run_all.py --sin-descargar
 ### 5) Correr pruebas
 
 ```powershell
-python -m pytest -q
+python -m pytest tests -q
 ```
 
 ### 6) Lanzar dashboard
@@ -68,7 +68,7 @@ En la pestaña **Blockchain** puedes subir un archivo para calcular su SHA-256 y
 | data/blockchain/ | Cadena JSON + evidencia. |
 | models/ | Modelos entrenados (.joblib). |
 | src/ | Codigo (modulos ejecutados como scripts). |
-| tests/ | Pruebas automaticas (31 passing). |
+| tests/ | Pruebas automaticas (64 passing). |
 | README.md | Guia general de uso. |
 | README_CARPETAS.md | Explicacion detallada de cada carpeta/archivo. |
 | ARQUITECTURA.md | Flujo y arquitectura. |

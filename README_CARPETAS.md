@@ -10,7 +10,7 @@ Detalle de cada carpeta del proyecto y que se guarda en ella.
 | `data/raw/cicids2017/` | Los 8 archivos parquet de CICIDS2017 (flujos de red). | Descarga HuggingFace |
 | `data/raw/cti_reports/` | `cti_reports.parquet` con los reportes de amenazas (texto). | Descarga HuggingFace |
 | `data/processed/` | Datos limpios, divididos y listos para ML/PNL. | LOAD |
-| `data/reports/` | Evidencia auditable del ETL (CSV). | EXTRACT + LOAD |
+| `data/reports/` | Evidencia auditable (CSV) de ETL, ML, PNL, Integración y Blockchain. | EXTRACT + LOAD + ML + PNL + INTEGRAR + BLOCKCHAIN |
 | `data/figures/` | Graficos generados (matriz de confusion, etc.). | ML / dashboard |
 | `data/blockchain/` | Cadena de bloques y artefactos de trazabilidad. | Blockchain |
 
@@ -45,6 +45,7 @@ Detalle de cada carpeta del proyecto y que se guarda en ella.
 | `reportes_enriquecidos.parquet` | Reportes con sentimiento, IOCs, terminos clave y resumen. |
 | `predicciones_test.parquet` | Prediccion del modelo sobre la particion de prueba. |
 | `estandarizacion.json` | Media y desviacion por columna para reutilizar el escalado. |
+| `transformacion.json` | Limites winsor, constantes y derivadas T07 ajustados solo con train (para inferencia identica al entrenamiento). |
 
 ## `data/reports/` — evidencia auditable
 

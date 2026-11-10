@@ -34,7 +34,7 @@ from collections import Counter
 
 import numpy as np
 import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS, TfidfVectorizer
 
 from config import (
     FIGURES,
@@ -68,6 +68,14 @@ PATRONES = {
 }
 
 _SENT_ORACION = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9])")
+_COLA_TOC = re.compile(r"\.{4,}")
+# Encabezados de seccion / lineas de sumario que NO son oraciones utiles.
+# fullmatch sobre la linea completa para no descartar oraciones reales.
+_SECCION_TOC = re.compile(
+    r"\s*(executive\s+summary|table\s+of\s+contents|table\s+of\s+figures|contents|"
+    r"index|references|bibliography|appendix|acknowledg(e)?ments|about\s+this\s+report)\s*:?\s*(\d{1,3}|page\s*\d{1,3})?\s*$",
+    re.IGNORECASE,
+)
 _LEX_NEGATIVO = {
     "attack", "exploit", "malware", "vulnerability", "critical", "severe",
     "threat", "breach", "ransomware", "compromise", "malicious", "risk",
@@ -95,15 +103,35 @@ def cargar_reportes(ruta=REPORTES) -> pd.DataFrame:
 # --------------------------------------------------------------------------
 # 1. Representacion del lenguaje (TF-IDF)
 # --------------------------------------------------------------------------
+_ENLACE_O_CODIGO = re.compile(
+    r"https?://\S+|www\.\S+|\b[a-fA-F0-9]{32}\b|\b[a-fA-F0-9]{40}\b|\b[a-fA-F0-9]{64}\b|"
+    r"\bCVE-\d{4}-\d{4,7}\b|\S+@\S+|\b(?:\d{1,3}\.){3}\d{1,3}\b",
+    re.IGNORECASE,
+)
+_STOPWORDS_DOMINIO = {
+    "com", "www", "http", "https", "exe", "figure", "fig", "www", "ftp",
+    "report", "research", "analysis", "pdf",
+}
+
+
+def _preprocesar_tfidf(texto: str) -> str:
+    """Reduce el ruido de URLs/hashes/CVEs/correos/IPs embebidos en los CTI,
+    para que el vocabulario refleje tecnicas y hallazgos, no enlaces."""
+    limpio = _desdefanguear(texto)
+    limpio = _ENLACE_O_CODIGO.sub(" ", limpio)
+    return limpio
+
+
 def vectorizar(textos: list[str]) -> tuple[TfidfVectorizer, object]:
+    saneados = [_preprocesar_tfidf(t) for t in textos]
     vectorizer = TfidfVectorizer(
-        stop_words="english",
+        stop_words=sorted(set(ENGLISH_STOP_WORDS) | _STOPWORDS_DOMINIO),
         ngram_range=(1, 2),
         min_df=2,
         max_features=4000,
         sublinear_tf=True,
     )
-    matriz = vectorizer.fit_transform(textos)
+    matriz = vectorizer.fit_transform(saneados)
     return vectorizer, matriz
 
 
@@ -158,12 +186,11 @@ def sentimiento(texto: str, analizador=None) -> tuple[float, str]:
 # 3. Reconocimiento de entidades (IOCs)
 # --------------------------------------------------------------------------
 def _ip_valida(ip: str) -> bool:
-    """IPv4 valida: 4 octetos 0-255 y sin ceros a la izquierda (rechaza '10.2.3.4'
-    que en realidad es una version tipo '10.2.3.4'? No: esa ES una IPv4 valida.
+    """IPv4 sintacticamente valida: 4 octetos 0-255, sin ceros a la izquierda.
 
-    Lo que se rechaza es algo como '1.2.3.4.5' (ya cubierto por el patron) y los
-    rangos fuera de 0-255. Ademas se exige que no haya octetos con ceros a la
-    izquierda (evita confundir fechas/timestamps tipo '2026.10.1.0' parciales).
+    No decide por si sola si es un IOC: 10.2.3.4 ES una IPv4 valida. La
+    decision de IOC vs version se toma con el contexto (_es_version_contexto).
+    Ademas se rechazan direcciones reservadas (_ip_reservada).
     """
     partes = ip.split(".")
     if len(partes) != 4:
@@ -176,41 +203,112 @@ def _ip_valida(ip: str) -> bool:
     return True
 
 
-def _es_versionish(ip: str) -> bool:
-    """Heuristica: descarta cadenas que parecen versiones de software.
-
-    Una version suele tener numeros pequenos (0-20) en los ultimos octetos y un
-    primer octeto pequeno (<10). Ej: 1.2.3.4, 2.0.1.5. Se descarta solo si
-    TODOS los octetos son <= 20 (poco probable en una IP real en uso).
-    """
+def _ip_reservada(ip: str) -> bool:
+    """Direcciones que no son IOC globales (loopback, enlace local, multicast,
+    reservado). Las RFC1918 (10/8, 172.16/12, 192.168/16) SI se conservan: son
+    validas y habituales en reportes de incidentes internos."""
     try:
-        partes = [int(p) for p in ip.split(".")]
+        a, b, c, d = (int(p) for p in ip.split("."))
     except ValueError:
+        return True
+    if a == 0 or a == 127:
+        return True                      # 0.0.0.0/8 y 127.0.0.0/8
+    if a == 169 and b == 254:
+        return True                      # enlace local
+    if a >= 224:
+        return True                      # multicast y 240.0.0.0/4
+    return False
+
+
+_CONTEXTO_VERSION = re.compile(
+    r"version|release|build|update|\bdot\b|\.js\b|\bv\b|v\d",
+    re.IGNORECASE,
+)
+
+
+def _ventana_contexto(texto: str, inicio: int, fin: int, chars: int = 12) -> str:
+    """Ventana de ~`chars` caracteres antes y despues del match (sin incluirlo)."""
+    return texto[max(0, inicio - chars) : inicio] + " " + texto[fin : fin + chars]
+
+
+def _es_version_contexto(texto: str, inicio: int, fin: int) -> bool:
+    """True si la IPv4 esta pegada a tokens de contexto de version de software
+    (version|v|release|build|update|dot|.js o v<digito>) en una ventana de
+    ~12 chars antes/despues. Es el UNICO criterio para descartar una IPv4
+    por 'parecer version'; 8.8.8.8 y cualquier IPv4 publica se conservan."""
+    return bool(_CONTEXTO_VERSION.search(_ventana_contexto(texto, inicio, fin, 12)))
+
+
+def _es_versionish(ip: str, contexto: str = "") -> bool:
+    """Compatibilidad con llamadas aisladas.
+
+    Una IPv4 por si sola NUNCA se descarta como version (los octetos pequenos
+    son comunes en IPs reales, p. ej. 8.8.8.8 o 1.1.1.1). Solo se descarta
+    cuando `contexto` contiene tokens de version; ver _es_version_contexto.
+    """
+    if not contexto:
         return False
-    return all(p <= 20 for p in partes)
+    return bool(_CONTEXTO_VERSION.search(contexto))
 
 
 def _limpiar_ipv4(ips: list[str]) -> list[str]:
-    return [ip for ip in ips if _ip_valida(ip) and not _es_versionish(ip)]
+    return [ip for ip in ips if _ip_valida(ip) and not _ip_reservada(ip)]
+
+
+def _desdefanguear(texto: str) -> str:
+    """Normaliza IOCs con defang para que coincidan.
+
+    hxxp/hXXp -> http, hxxps -> https, [.]/(.)/{.}/[ . ]/[dot] -> '.',
+    [at]/(at)/(@) -> '@', [colon] -> ':' (los corchetes toleran espacios
+    internos por reflujo de PDF, p. ej. 'github[. ]com'; un '[.' colgante
+    seguido de alfanumerico, p. ej. 'kentona[.su', tambien se normaliza).
+    Se aplica SOLO a la copia en memoria usada para extraccion y
+    vectorizacion; el texto persistido en reportes_enriquecidos (y cualquier
+    salida) conserva el original intacto.
+    """
+    t = re.sub(r"hxxps", "https", texto, flags=re.IGNORECASE)
+    t = re.sub(r"hxxp", "http", t, flags=re.IGNORECASE)
+    t = re.sub(r"\[\s*\.\s*\]|\(\s*\.\s*\)|\{\s*\.\s*\}|\[\s*(?:dot|dott)\s*\]|\(\s*(?:dot|dott)\s*\)", ".", t, flags=re.IGNORECASE)
+    # Defang incompleto del corpus: '[.' seguido directamente de alfanumerico ('kentona[.su').
+    t = re.sub(r"\[\.(?=[A-Za-z0-9])", ".", t)
+    t = re.sub(r"\[\s*(?:at|att)\s*\]|\(\s*(?:at|att)\s*\)|\(@\)|\[@\]", "@", t, flags=re.IGNORECASE)
+    t = re.sub(r"\[\s*(?:colon|co)\s*\]", ":", t, flags=re.IGNORECASE)
+    return t
 
 
 def extraer_iocs(texto: str) -> dict[str, list[str]]:
     """Extrae IOCs evitando solapamientos entre patrones.
 
-    Un dominio que forma parte de una URL o de un correo NO se cuenta tambien
-    como dominio suelto: el orden de extraccion garantiza exclusion mutua.
+    Trabaja sobre una copia desdefangueada en memoria (hxxp->http, [.]->.,
+    [at]->@...); el texto original nunca se modifica ni se persiste alterado.
+    Los rangos ya ocupados por extracciones previas (url/email antes que el
+    resto) se excluyen mutuamente: un dominio dentro de una URL o un correo NO
+    se cuenta tambien como dominio suelto. Las IPv4 se descartan si son
+    sintacticamente invalidas, reservadas (0/8, 127/8, 169.254/16, 224/4,
+    240/4) o si el contexto cercano (~12 chars) indica que son una version de
+    software (_es_version_contexto). RFC1918 (10/8, 172.16/12, 192.168/16) y
+    cualquier IP publica (p. ej. 8.8.8.8) se conservan.
     """
     hallazgos: dict[str, list[str]] = {tipo: [] for tipo in PATRONES}
-    restante = texto
+    trabajo = _desdefanguear(texto)
+    ocupado: list[tuple[int, int]] = []
 
     for tipo in ("url", "email", "ipv4", "md5", "sha1", "sha256", "cve", "dominio"):
         patron = PATRONES[tipo]
-        encontrados = patron.findall(restante)
-        if tipo == "ipv4":
-            encontrados = _limpiar_ipv4(encontrados)
+        encontrados: list[str] = []
+        for m in patron.finditer(trabajo):
+            ini, fin = m.span()
+            if any(not (fin <= a or ini >= b) for a, b in ocupado):
+                continue
+            valor = m.group()
+            if tipo == "ipv4":
+                if not _ip_valida(valor) or _ip_reservada(valor):
+                    continue
+                if _es_version_contexto(trabajo, ini, fin):
+                    continue
+            encontrados.append(valor)
+            ocupado.append((ini, fin))
         hallazgos[tipo] = encontrados
-        for valor in encontrados:
-            restante = restante.replace(valor, " ")
 
     return hallazgos
 
@@ -235,7 +333,33 @@ def _idf_valores(vectorizer) -> dict[str, float]:
 
 
 def resumir(texto: str, idf: dict[str, float], n: int = PNL_RESUMEN_ORACIONES) -> str:
-    oraciones = [o.strip() for o in _SENT_ORACION.split(texto) if len(o.strip()) > 30]
+    def _oracion_util(oracion: str) -> bool:
+        palabras = re.findall(r"\w+", oracion)
+        if len(palabras) < 8:
+            return False
+        alfabeticas = sum(1 for c in oracion if c.isalpha())
+        return alfabeticas >= 0.6 * max(1, len(oracion))
+
+    oraciones = []
+    for cruda in _SENT_ORACION.split(texto):
+        oracion = cruda.strip()
+        if not oracion or _COLA_TOC.search(oracion) or _SECCION_TOC.match(oracion):
+            continue
+        if _oracion_util(oracion):
+            oraciones.append(oracion)
+    if not oraciones:
+        # fallback: primera oracion razonable (sin TOC ni cabeceras repetidas)
+        for cruda in _SENT_ORACION.split(texto):
+            oracion = cruda.strip()
+            if (
+                oracion
+                and not _COLA_TOC.search(oracion)
+                and not _SECCION_TOC.match(oracion)
+                and len(re.findall(r"[A-Za-z0-9]+", oracion)) >= 4
+            ):
+                return oracion
+        compacto = texto.strip()
+        return compacto[:300] if compacto else ""
     if len(oraciones) <= n:
         return " ".join(oraciones)
     puntajes = []
@@ -323,16 +447,33 @@ def analizar(reportes: pd.DataFrame | None = None) -> dict:
             iocs_largos.append({"tipo": tipo, "valor": valor, "frecuencia": freq})
     iocs_df = pd.DataFrame(iocs_largos)
 
+    hashes = Counter()
+    for tipo in ("md5", "sha1", "sha256"):
+        for valor, freq in contadores[tipo].items():
+            hashes[valor.lower()] += freq
+
+    iocs_distintos_total = int(sum(len(c) for c in contadores.values()))
+    documentos_con_iocs = int((enriquecido["n_iocs"] > 0).sum())
+    pct_docs_iocs = documentos_con_iocs / len(enriquecido) * 100 if len(enriquecido) else 0.0
+    duplicados_exactos = int(pd.Series(textos).duplicated().sum())
+    columnas_iocs = ["ipv4", "dominio", "url", "hash", "cve", "email"]
+    total_ocurrencias = int(entidades[columnas_iocs].to_numpy().sum())
     kpis = pd.DataFrame(
         [
             ("Documentos analizados", len(enriquecido), "reportes CTI"),
-            ("Sentimiento promedio", round(float(enriquecido["sentimiento_compound"].mean()), 4), "VADER compound"),
-            ("% negativo", f"{(enriquecido['sentimiento'] == 'negativo').mean() * 100:.1f}%", "tono de amenaza"),
-            ("Total de IOCs", int(entidades[["ipv4", "dominio", "url", "hash", "cve", "email"]].to_numpy().sum()), "entidades detectadas"),
-            ("CVE distintos", int(len(contadores["cve"])), "codigos de vulnerabilidad (todos)"),
-            ("Dominios distintos", int(len(contadores["dominio"])), "dominios sueltos (todos)"),
-            ("IPs distintas", int(len(contadores["ipv4"])), "direcciones IPv4 validas (todas)"),
-            ("Terminos en el vocabulario", int(matriz.shape[1]), "TF-IDF (1-2 gramas)"),
+            ("Documentos con >=1 IOC (%)", f"{pct_docs_iocs:.1f}%", f"{documentos_con_iocs} de {len(enriquecido)} documentos"),
+            ("Documentos con texto duplicado exacto", duplicados_exactos, "deduplicados por la ETL antes de PNL (T04)"),
+            ("Sentimiento promedio", round(float(enriquecido["sentimiento_compound"].mean()), 4), "VADER compound (truncado a 4k chars)"),
+            ("% negativo", f"{(enriquecido['sentimiento'] == 'negativo').mean() * 100:.1f}%", "proxy lexico, no calibrado"),
+            ("Total de IOCs", total_ocurrencias, "OCURRENCIAS (menciones), no valores distintos"),
+            ("IOCs distintos (total)", iocs_distintos_total, "valores distintos sumados por tipo"),
+            ("CVE distintos", int(len(contadores["cve"])), f"ocurrencias: {sum(contadores['cve'].values())}"),
+            ("Dominios distintos", int(len(contadores["dominio"])), f"ocurrencias: {sum(contadores['dominio'].values())}"),
+            ("IPs distintas", int(len(contadores["ipv4"])), f"ocurrencias: {sum(contadores['ipv4'].values())} (v4 publicas/privadas, sin reservadas)"),
+            ("URLs distintas", int(len(contadores["url"])), f"ocurrencias: {sum(contadores['url'].values())}"),
+            ("Hashes distintos", int(len(hashes)), f"ocurrencias: {sum(hashes.values())} (md5+sha1+sha256)"),
+            ("Emails distintos", int(len(contadores["email"])), f"ocurrencias: {sum(contadores['email'].values())}"),
+            ("Terminos en el vocabulario", int(matriz.shape[1]), "TF-IDF (1-2 gramas, tope 4000)"),
             ("Motor de sentimiento", motor, "implementacion usada"),
         ],
         columns=["indicador", "valor", "nota"],
@@ -350,7 +491,7 @@ def analizar(reportes: pd.DataFrame | None = None) -> dict:
     _guardar_figuras(dist_sent, terminos)
     _escribir_reporte(kpis, dist_sent, terminos, iocs_df, enriquecido)
 
-    LOG.info("  documentos=%s  vocabulario=%s  IOCs=%s", len(enriquecido), matriz.shape[1], int(entidades[["ipv4", "dominio", "url", "hash", "cve", "email"]].to_numpy().sum()))
+    LOG.info("  documentos=%s  vocabulario=%s  IOCs=%s", len(enriquecido), matriz.shape[1], total_ocurrencias)
     LOG.info("  sentimiento: %s", ", ".join(f"{r.sentimiento}={r.documentos}" for r in dist_sent.itertuples()))
     LOG.info("[ok] PNL guardado en %s", REPORTS)
     return {
@@ -375,6 +516,11 @@ def _escribir_reporte(kpis, dist_sent, terminos, iocs_df, enriquecido) -> str:
         "|---|---|---|",
     ]
     lineas += [f"| {r.indicador} | {r.valor} | {r.nota} |" for r in kpis.itertuples()]
+    lineas += [
+        "",
+        "> Nota: «Total de IOCs» son OCURRENCIAS (menciones repetidas por tipo);",
+        "> la columna «X distintos» reporta valores diferentes. El corpus ya viene deduplicado por la ETL (T04).",
+    ]
     lineas += ["", "## Distribucion de sentimiento", "", "| Sentimiento | Documentos | % |", "|---|---|---|"]
     lineas += [f"| {r.sentimiento} | {r.documentos} | {r.porcentaje}% |" for r in dist_sent.itertuples()]
     lineas += ["", "## Terminos mas relevantes (TF-IDF)", ""]
