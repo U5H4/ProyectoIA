@@ -84,7 +84,7 @@ El enunciado pide un prototipo funcional, no un producto comercial. Por tanto:
 
 ## 6. OBJETIVO GENERAL
 
-Diseñar y desarrollar un prototipo local y reproducible de un Sistema Inteligente que analice incidentes de ciberseguridad desde tráfico estructurado y reportes CTI, clasifique los ataques con un modelo de ML justificado, procese texto con PNL para extraer IOCs y oreas, e integre ambos resultados en un reporte con nivel de riesgo verificable mediante Blockchain.
+Diseñar y desarrollar un prototipo local y reproducible de un Sistema Inteligente que analice incidentes de ciberseguridad desde tráfico estructurado y reportes CTI, clasifique los ataques con un modelo de ML justificado, procese texto con PNL para extraer IOCs y resúmenes, e integre ambos resultados en un reporte con nivel de riesgo verificable mediante Blockchain.
 
 ## 7. OBJETIVOS ESPECÍFICOS
 
@@ -112,9 +112,9 @@ Diseñar y desarrollar un prototipo local y reproducible de un Sistema Inteligen
 
 | # | Limitación | Mitigación aplicada |
 |---|---|---|
-| 1 | **Muestreo agresivo** (~0,7 % del crudo sobrevive; prevalece ~50/50 DoS/BENIGN artificial) | PFI documentado en `INFORME.md §12`; métricas sobre test estratificado; alternativas no evaluadas por límites de cómputo |
+| 1 | **Muestreo agresivo** (~0,7 % del crudo sobrevive; DoS y BENIGN quedan fijos en 4.444 cada uno) | ETL documentada en `INFORME.md` §12; métricas sobre test estratificado; alternativas no evaluadas por límites de cómputo |
 | 2 | **Clases ínfimas** (Heartbleed n=11, Infiltration n=36 en test: 3 y 11) | Se reportan `metricas_por_clase.csv`; su F1 no es conclusión estadística |
-| 3 | **Prevalencia artificial** tras el balanceo ⇒ métricas optimistas vs. producción | Se documenta en `README.md`/`ARQUITECTURA.md`; elección de métrica macro sobre ponderada |
+| 3 | **Prevalencia artificial** tras el balanceo ⇒ métricas optimistas vs. producción | Se documenta en `README.md` (§“Problemas encontrados”) y en `INFORME.md` §12/§16; elección de métrica macro sobre ponderada |
 | 4 | **VADER en CTI**: proxy léxico, no medida calibrada de amenaza | Se reporta como proxy, no como semántica; disclaimers en `README.md` |
 | 5 | **Extracción de IOCs por regex**, no NER entrenado | Se validan IPv4/fechas/versiones y se desdefanguean IOCs antes de extraer; se excluye doble conteo URL/email→dominio |
 | 6 | **Blockchain propia sin consenso** | Garantiza detección de alteraciones, no inmutabilidad distribuida; ámbito local |
@@ -154,7 +154,7 @@ ENTRADA (HuggingFace)
                     ↓
         ┌─────────────┴─────────────┐
         ↓                           ↓
-   4a. PNL sobre textos¡      4b. ML sobre flujos
+   4a. PNL sobre textos      4b. ML sobre flujos
    TF-IDF · VADER · IOCs     selección CV · GridSearchCV
    resumen extractivo           6 algoritmos entrenados
         └─────────────┬─────────────┘
@@ -181,7 +181,7 @@ ENTRADA (HuggingFace)
 - **Tipo:** flujo de red etiquetado (ataques reales capturados de tráfico e inyectado durante una semana).
 - **Origen oficial:** https://www.unb.ca/cic/datasets/ids-2017.html
 - **Espejo usado:** `huggingface.co/datasets/bvsam/cic-ids-2017` (parquet convertido por terceros por compatibilidad con pandas).
-- **Contenido:** 8 archivos (Monday–Friday, mañana/tarde), ~2,8 M flujos crudos, 79 columnas, 9 clases tras el mapeo ICPP.
+- **Contenido:** 8 archivos (Monday–Friday, mañana/tarde), ~2,8 M flujos crudos, 79 columnas, 9 clases tras el mapeo a 9 clases.
 - **Etiquetas originales:** BENIGN + ataques (DoS, DDoS, PortScan, Web Attack, BruteForce, Bot, Heartbleed, Infiltration) — con encoding de etiquetas con `\ufffd` en algunas filas, por lo que `T02` normaliza unicode antes de agruparlas.
 - **Tamaño usado:** 19.815 flujos (tras muestreo → balanceo), 72 predictoras.
 
@@ -240,7 +240,7 @@ El flujo ejecuta `etl_extract` → `etl_transform` → `etl_load`. Las transform
 |---|---|---|---|
 | T01 | Deduplicado exacto (flujos) | 36.193 → 34.181 | Evita que el mismo paquete aparezca en train y test |
 | T01 | Deduplicado exacto (CTI) | 978 → 974 (después del `CTI_MAX_CHARS`) | 4 textos idénticos tras truncado |
-| T02 | Unicode/ICPP | normaliza etiquetas con `\ufffd` | Unificar encoding |
+| T02 | Unicode (normalización de etiquetas) | normaliza etiquetas con `\ufffd` | Unificar encoding |
 | T03 | Coerce numérico | `pd.to_numeric(errors='coerce')` | Forzar tipos sin romper filas |
 | T04 | Inf→NaN + `dropna` | 34.181 → 34.157 | 24 filas con NaN/Inf descartadas (43 celdas) |
 | T05 | Validación/agrupación etiquetas | mapeo a 9 clases | Estabilizar el número de categorías |
@@ -283,7 +283,7 @@ CICIDS2017 crudo está fuertemente desbalanceado (BENIGN ≈ 80 %). Antes del sp
 
 - **Problema:** ¿a qué tipo de ataque (o BENIGN) pertenece un flujo de red?
 - **Tipo:** clasificación supervisada multiclase (9 clases).
-- **Target:** `label` (9 categorías tras mapeo ICPP).
+- **Target:** `label` (9 categorías tras mapeo a 9 clases).
 - **Métrica objetivo:** **F1-macro** (evaluación sobre todas las clases por igual). Accuracy y F1-weighted se reportan como complemento, pero no sustituyen a F1-macro como criterio de selección.
 
 ### 13.2 Variables usadas
@@ -416,7 +416,7 @@ Demostrar que el prototipo procesa información textual real (CTI) con técnicas
 ### 14.6 Funcionalidad 4 — Generación de lenguaje (resumen extractivo)
 
 - Por cada reporte: top-2 oraciones por suma de IDF sobre palabras significativas.
-- Filtro de TOC/dot-leaders (`/\.{4,}/`), encabezados de sección y oraciones con <8 palabras o no mayoritariamente alfabéticas; fallback a primea oración razonable.
+- Filtro de TOC/dot-leaders (`/\.{4,}/`), encabezados de sección y oraciones con <8 palabras o no mayoritariamente alfabéticas; fallback a primera oración razonable.
 - Reporte narrativo global: `data/reports/pnl_reporte.md` (integrando KPIs, sentimiento, top términos, top IOCs, 3 ejemplos de resumen).
 - Limitación explícita: un extractivo sobre texto-PDF-mal-extraído puede devolver oraciones aisladas poco coherentes; mejorar requiere margen + modelo generativo/NER entrenado (trabajo futuro).
 
@@ -424,7 +424,7 @@ Demostrar que el prototipo procesa información textual real (CTI) con técnicas
 
 - `data/processed/reportes_enriquecidos.parquet` (974 filas)
 - `data/reports/pnl_{resumen.csv,sentimiento.csv,top_terminos.csv,iocs.csv,entidades.csv,reporte.md}`
-- `data/figures/pnl_sentimient.html`, `pnl_top_terminos.html`
+- `data/figures/pnl_sentimiento.html`, `pnl_top_terminos.html`
 - `tests/test_pnl.py` (10 tests, incluyendo reglas de desdefangueo y reservadas)
 
 ## 15. COMPONENTE BLOCKCHAIN
@@ -441,7 +441,7 @@ Demostrar que el prototipo procesa información textual real (CTI) con técnicas
 | `pnl_reporte.md` | bloque 6 | reporte de texto generado |
 | `reporte_integrado.json` | bloque 7 | nivel de riesgo global ML+PNL |
 
-Justificación: estos son los artefactos que sostienen el flujo completo Entrada→Result resultados→Dashboard; si cualquiera cambia después de la entrega, la cadena lo detecta.
+Justificación: estos son los artefactos que sostienen el flujo completo Entrada→Resultados→Dashboard; si cualquiera cambia después de la entrega, la cadena lo detecta.
 
 ### 15.2 Estructura de bloques
 
@@ -470,8 +470,8 @@ Antes de cada reconstrucción, `ejecutar()` archiva la cadena previa íntegra en
 ### 15.7 Limitaciones explícitas
 
 - **Sin consenso distribuido**: cadena propia, ámbito local, un único custodio.
-- **Sin firma criptográfica**: cualquier actor con acceso al árbol de trabajo puede fabricar una cadena coherente si reconstruye todos los artefactos; para ancla real se necesitaría Git-LFS + hash anclado en un tag externo o notarioTimestamp público (trabajo futuro).
-- **No es inmutable por construcción**: se protege siendo honesto sobre lo que cubre y verifying en vivo.
+- **Sin firma criptográfica**: cualquier actor con acceso al árbol de trabajo puede fabricar una cadena coherente si reconstruye todos los artefactos; para ancla real se necesitaría Git-LFS + hash anclado en un tag externo o notario de timestamp (timestamping público) (trabajo futuro).
+- **No es inmutable por construcción**: se protege siendo honesto sobre lo que cubre y verificándola en vivo.
 
 ### 15.8 Evidencia
 
