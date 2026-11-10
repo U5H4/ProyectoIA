@@ -248,6 +248,12 @@ streamlit run src/dashboard.py
 
 ## Fuentes de datos
 
+`python src/run_all.py` descarga CICIDS2017 y CTI automáticamente (con aviso de licencia). Enlaces directos por si necesitas descargarlos a mano:
+
+- **CICIDS2017 (UNB, acepta términos):** https://www.unb.ca/cic/datasets/ids-2017.html
+- **Espejo parquets (HuggingFace):** https://huggingface.co/datasets/bvsam/cic-ids-2017/tree/main/machine_learning
+- **CTI Reports (parquet directo):** https://huggingface.co/datasets/guychuk/cyber-threat-intelligence-reports/resolve/main/data/train-00000-of-00001.parquet
+
 | Fuente | Uso | Enlace |
 |---|---|---|
 | CICIDS2017 (MachineLearningCVE) | ML: clasificacion de flujos | https://www.unb.ca/cic/datasets/ids-2017.html |

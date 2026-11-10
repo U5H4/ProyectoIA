@@ -383,12 +383,33 @@ def _guardar_figuras(sentimiento_df: pd.DataFrame, terminos: pd.DataFrame) -> No
     asegurar_dir(FIGURES)
     px.bar(
         sentimiento_df, x="sentimiento", y="documentos", color="sentimiento",
-        title="Documentos por sentimiento", text="documentos",
-    ).write_html(FIGURES / "pnl_sentimiento.html", include_plotlyjs="cdn")
+        color_discrete_map={"negativo": "#d32f2f", "positivo": "#2e7d32", "neutro": "#607d8b"},
+        title="Documentos por sentimiento (VADER — proxy léxico, truncado 4.000 chars)",
+        text="documentos", labels={"documentos": "N.º documentos", "sentimiento": "Sentimiento"},
+    ).update_layout(
+        title_x=0.5, font=dict(size=13),
+        margin=dict(l=70, r=30, t=70, b=60),
+    ).update_traces(textposition="outside", showlegend=False).update_yaxes(rangemode="tozero", range=[0, 630]).write_html(
+        FIGURES / "pnl_sentimiento.html", include_plotlyjs="directory"
+    )
     px.bar(
         terminos.sort_values("relevancia"), x="relevancia", y="termino",
-        orientation="h", title="Terminos mas relevantes (TF-IDF)",
-    ).write_html(FIGURES / "pnl_top_terminos.html", include_plotlyjs="cdn")
+        orientation="h", color_discrete_sequence=["#00838f"],
+        labels={"relevancia": "Relevancia TF-IDF (sumatoria)", "termino": "Término"},
+        title="Términos más relevantes (TF-IDF)",
+    ).update_layout(
+        title_x=0.5, font=dict(size=13),
+        margin=dict(l=110, r=30, t=70, b=60),
+        annotations=[
+            dict(
+                x=0.99, y=-0.22, xref="paper", yref="paper", showarrow=False,
+                text="ngramas (1-2) · 4.000 términos tope · stopwords personalizadas (com, www, http, exe, figure)",
+                align="right", font=dict(size=11, color="#37474f"),
+            ),
+        ],
+    ).write_html(
+        FIGURES / "pnl_top_terminos.html", include_plotlyjs="directory"
+    )
 
 
 # --------------------------------------------------------------------------

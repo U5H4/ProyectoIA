@@ -199,7 +199,26 @@ ENTRADA (HuggingFace)
 - **CTI Reports:** uso demostrativo/académico; no redistribuya; sin datos personales identificables (los IOCs son atributos de infraestructura, no datos de personas).
 - **Ambos:** sin datos personales identificables de personas físicas; IOCs son de infraestructura (C2, dominios maliciosos, hashes).
 
-### 11.4 Volumen y esfuerzo de datos
+### 11.4 Descarga manual (fuentes exactas)
+
+`python src/run_all.py` descarga automáticamente ambos (con aviso de licencia CICIDS2017). Enlaces directos:
+
+- **CICIDS2017 (UNB, requiere aceptar términos):** https://www.unb.ca/cic/datasets/ids-2017.html
+- **Espejo parquets (HuggingFace):** https://huggingface.co/datasets/bvsam/cic-ids-2017/tree/main/machine_learning
+- **Reportes CTI (parquet directo):** https://huggingface.co/datasets/guychuk/cyber-threat-intelligence-reports/resolve/main/data/train-00000-of-00001.parquet
+
+Archivos del espejo CICIDS2017 (subcarpeta `machine_learning/`):
+
+- https://huggingface.co/datasets/bvsam/cic-ids-2017/resolve/main/machine_learning/Monday-WorkingHours.pcap_ISCX.csv.parquet
+- https://huggingface.co/datasets/bvsam/cic-ids-2017/resolve/main/machine_learning/Tuesday-WorkingHours.pcap_ISCX.csv.parquet
+- https://huggingface.co/datasets/bvsam/cic-ids-2017/resolve/main/machine_learning/Wednesday-workingHours.pcap_ISCX.csv.parquet
+- https://huggingface.co/datasets/bvsam/cic-ids-2017/resolve/main/machine_learning/Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv.parquet
+- https://huggingface.co/datasets/bvsam/cic-ids-2017/resolve/main/machine_learning/Thursday-WorkingHours-Afternoon-Infilteration.pcap_ISCX.csv.parquet
+- https://huggingface.co/datasets/bvsam/cic-ids-2017/resolve/main/machine_learning/Friday-WorkingHours-Morning.pcap_ISCX.csv.parquet
+- https://huggingface.co/datasets/bvsam/cic-ids-2017/resolve/main/machine_learning/Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv.parquet
+- https://huggingface.co/datasets/bvsam/cic-ids-2017/resolve/main/machine_learning/Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv.parquet
+
+### 11.5 Volumen y esfuerzo de datos
 
 | Métrica | Flujos (ML) | CTI (PNL) |
 |---|---|---|
@@ -349,7 +368,13 @@ Heartbleed (3 casos) e Infiltration (11 casos) no son conclusiones estadísticas
 - `data/processed/predicciones_test.parquet` (`label`, `prediccion`, `acierto`)
 - `data/reports/metricas_modelos.csv`, `metricas_por_clase.csv`, `matriz_confusion.csv`, `importancia_variables.csv`, `ml_resumen.json`
 - `data/reports/validacion_minimos.csv` (ML mínimo 5.000 ⇒ 19.815; PNL mínimo 300 ⇒ 974)
-- `logs/pipeline.log` (ETL 115 s, ML 72 s, PNL 64 s, Blockchain < 1 s)
+- `logs/pipeline.log` (ETL ~115 s, ML ~70 s, PNL ~62 s, Blockchain < 1 s)
+
+### 13.9 Figuras generadas (lectura e interpretación)
+
+**`comparacion_modelos.html`.** Barra horizontal con el F1-macro ordenado por CV de los 6 algoritmos. Cada barra lleva `test=... · CV=...` como etiqueta. El eje vertical es CV (5 folds, sobre train), la métrica con la que se seleccionó. El subtítulo recuerda el criterio real (gana Random Forest por CV=0.978, no por test). Aunque Árbol de Decisión tiene un F1-macro en test ligeramente mayor (0.9905 vs 0.9899), no se elige por test; elegir por test rompería la honestidad de la selección. La figura prueba que se comparan varios modelos, no que se entrena uno solo.
+
+**`matriz_confusion.html`.** Heatmap de la matriz de confusión del ganador sobre el holdout (5.945 flujos). Filas=reales, columnas=predichas. Los bloques en la diagonal son aciertos: BENIGN 1309/1333, BruteForce 844/845, DoS 1327/1333, DDoS 599/600, PortScan 591/592, WebAttack 637/643. Infiltration 10/11, Heartbleed 3/3 (ya declarado ínfimo). El título y la anotación inferior incluyen accuracy global y F1-macro. Sirve para ver qué clases confunde el modelo; no como métrica de éxito aislada (la métrica de selección fue CV).
 
 ## 14. PROCESAMIENTO DE LENGUAJE NATURAL (PNL)
 
@@ -426,6 +451,12 @@ Demostrar que el prototipo procesa información textual real (CTI) con técnicas
 - `data/reports/pnl_{resumen.csv,sentimiento.csv,top_terminos.csv,iocs.csv,entidades.csv,reporte.md}`
 - `data/figures/pnl_sentimiento.html`, `pnl_top_terminos.html`
 - `tests/test_pnl.py` (10 tests, incluyendo reglas de desdefangueo y reservadas)
+
+### 14.8 Figuras generadas (lectura e interpretación)
+
+**`pnl_sentimiento.html`.** Conteo de documentos por sentimiento VADER. Los CTI resultan 558 negativos (57,3 %), 392 positivos (40,3 %), 24 neutros (2,5 %). El título ya aclara que es un **proxy léxico** (VADER sobre 4.000 chars), no una medida calibrada de "amenaza percibida"; y por eso el informe nunca lo usa como prueba de semántica, sino como señal de contexto en la integración ML+PNL. En el acto conviene decirlo así: "la mayoría del corpus habla en vocabulario de ataque, no sobre una escala humana de alegría/tristeza".
+
+**`pnl_top_terminos.html`.** Suma TF-IDF por término del vectorizador (1-2 gramas, tope 4.000, stopwords personalizadas). Muestran los términos con más peso léxico en el corpus (`malware`, `used`, `file`, `data`, `information`, `security`, `threat`, `attacks`, `attack`, ...). No son conteo de ocurrencias ni importancia de clase: son relevancia TF-IDF. Útil para saber **de qué habla el corpus** de forma global (malware/APT), no para decidir urgencia de un TOC concreto.
 
 ## 15. COMPONENTE BLOCKCHAIN
 

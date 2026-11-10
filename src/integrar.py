@@ -156,6 +156,13 @@ def integrar() -> dict:
     REPORTE_JSON.write_text(json.dumps(resumen, indent=2, ensure_ascii=False), encoding="utf-8")
     LOG.info("  nivel de riesgo global: %s", nivel)
     LOG.info("[ok] reporte integrado en %s", REPORTE_OUT)
+    # Generar el indice de visualizaciones (no bloquea la etapa si falla).
+    try:
+        from indice import generar_indice
+
+        generar_indice()
+    except Exception as exc:  # noqa: BLE001
+        LOG.warning("  no se pudo generar el indice de visualizaciones: %s", exc)
     return resumen
 
 

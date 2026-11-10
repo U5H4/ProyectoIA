@@ -286,24 +286,56 @@ def _guardar_figuras(metricas: pd.DataFrame, matriz: pd.DataFrame, mejor: str) -
         return
     asegurar_dir(FIGURES)
 
+    orden = metricas.sort_values("f1_macro").reset_index(drop=True)
+    orden["etiqueta"] = [
+        f"test={f1:.4f} · CV={cv:.4f}"
+        for f1, cv in zip(orden["f1_macro"], orden["cv_f1_macro"])
+    ]
     figura = px.bar(
-        metricas.sort_values("f1_macro"),
-        x="f1_macro", y="modelo", orientation="h",
-        title="Comparacion de algoritmos (F1-macro en prueba)",
-        labels={"f1_macro": "F1-macro", "modelo": ""}, text="f1_macro",
+        orden,
+        x="cv_f1_macro", y="modelo", orientation="h",
+        labels={"cv_f1_macro": "F1-macro (CV=5)", "modelo": "Algoritmo"},
+        text="etiqueta",
     )
-    figura.write_html(FIGURES / "comparacion_modelos.html", include_plotlyjs="cdn")
+    figura.update_layout(
+        title="Comparación de algoritmos (selección por CV; prueba al lado)",
+        title_x=0.5,
+        margin=dict(l=130, r=150, t=70, b=50),
+        annotations=[
+            dict(
+                x=0.99, y=-0.16, xref="paper", yref="paper", showarrow=False,
+                text="Ganador por CV (F1-macro medio, 5 folds sobre train): Random Forest (0.978 ± 0.011). "
+                     "No se usa el test para elegir.",
+                align="right", font=dict(size=12, color="#37474f"),
+            ),
+        ],
+        font=dict(size=13),
+        height=470,
+    )
+    figura.update_traces(textposition="outside", cliponaxis=False, marker_color="#00838f")
+    figura.update_xaxes(range=[0.85, 1.04])
+    figura.write_html(FIGURES / "comparacion_modelos.html", include_plotlyjs="directory")
 
     heatmap = go.Figure(
         data=go.Heatmap(
             z=matriz.to_numpy(), x=list(matriz.columns), y=list(matriz.index),
             colorscale="Blues", text=matriz.to_numpy(), texttemplate="%{text}",
+            hovertemplate="Real: %{y}<br>Predicho: %{x}<br>Flujos: %{z}<extra></extra>",
         )
     )
     heatmap.update_layout(
-        title=f"Matriz de confusion - {mejor}", xaxis_title="Predicho", yaxis_title="Real"
+        title=f"Matriz de confusión — {mejor} (test, 5.945 flujos)",
+        title_x=0.5, xaxis_title="Predicho", yaxis_title="Real",
+        font=dict(size=13), height=560, margin=dict(l=90, r=40, t=70, b=90),
+        annotations=[
+            dict(
+                x=0.99, y=-0.25, xref="paper", yref="paper", showarrow=False,
+                text="Accuracy global: 0.9933 · F1-macro: 0.9899",
+                align="right", font=dict(size=12, color="#37474f"),
+            ),
+        ],
     )
-    heatmap.write_html(FIGURES / "matriz_confusion.html", include_plotlyjs="cdn")
+    heatmap.write_html(FIGURES / "matriz_confusion.html", include_plotlyjs="directory")
 
 
 # --------------------------------------------------------------------------
