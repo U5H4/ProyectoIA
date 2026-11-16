@@ -636,6 +636,10 @@ python src/blockchain.py --solo-verificar
 python -c "import pandas as pd; print(pd.read_parquet('data/processed/flujos_test.parquet').shape)"  # (5945, 75)
 ```
 
+### A.bis Entrega de datasets (Entregable 2)
+
+El Entregable 2 se entrega en el archivo **`ProyectoIA_datasets.zip`** (excluido del repositorio), con: `data/raw/` (parquets originales CICIDS2017 + CTI), `data/processed/` (flujos_clean/train/test, reportes_clean/enriquecidos, predicciones_test, `transformacion.json`, `estandarizacion.json`) y `data/reports/` con la evidencia de preparación (`perfil_columnas.csv`, `calidad_transformaciones.csv`, `validacion_minimos.csv`, `evidencia_extraccion*.csv`). El dataset procesado está anclado en el blockchain (bloques 1 y 2) y puede verificarse con `--solo-verificar` tras descomprimir el ZIP en la raíz.
+
 ### B. Estándar de evidencia por etapas
 
 | Etapa | Artefacto en disco |

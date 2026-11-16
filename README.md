@@ -210,6 +210,23 @@ solo como referencia — el modelo la ignora). Resultado esperado aproximado:
 streamlit run src/dashboard.py
 ```
 
+## Entrega de datasets (Entregable 2)
+
+Los datos crudos y procesados no se versionan en git (demasiado pesados), por lo
+que se entregan aparte. El paquete `ProyectoIA_datasets.zip` contiene:
+
+- `data/raw/` — parquets originales (CICIDS2017 UNB espejo HF + reportes CTI).
+- `data/processed/` — datos limpios y modelos de preprocesado: `flujos_clean.parquet`,
+  `flujos_train/test.parquet`, `reportes_clean.parquet`, `reportes_enriquecidos.parquet`,
+  `predicciones_test.parquet`, `transformacion.json` y `estandarizacion.json`.
+- `data/reports/perfil_columnas.csv`, `calidad_transformaciones.csv`, `validacion_minimos.csv`,
+  `evidencia_extraccion.csv`, `evidencia_extraccion_columnas.csv` — evidencia de tratamiento.
+
+El dataset procesado está además anclado en el blockchain (`data/blockchain/cadena.json`,
+bloques 1 y 2), verificable con `python src/blockchain.py --solo-verificar`.
+Tras descomprimir en la raíz del proyecto, `python src/run_all.py --sin-descargar` reproduce
+todo sin volver a descargar. `ProyectoIA_datasets.zip` está excluido del repositorio (ver `.gitignore`).
+
 ## Fuentes de datos
 
 ### Requisitos de hardware
