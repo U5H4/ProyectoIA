@@ -201,10 +201,12 @@ graficas, resultados del analisis de texto, entidades, **prediccion en vivo**
 Blockchain.
 
 Para probar la inferencia hay un CSV de ejemplo listo para subir en la pestana
-**ML**: `examples/flujos_ejemplo.csv` (200 flujos crudos de CICIDS2017:
-100 BENIGN + 100 BruteForce FTP/SSH-Patator, con la columna `Label` original
+**ML**: `examples/flujos_ejemplo.csv` (1087 flujos crudos de CICIDS2017 con
+reparto variado entre las 9 clases — p.ej. 232 BENIGN, 161 BruteForce,
+186 DoS, 125 Web Attack, 131 DDoS, 118 PortScan, 87 Bot, 36 Infiltration,
+11 Heartbleed, con cantidades distintas por variante; columna `Label` original
 solo como referencia — el modelo la ignora). Resultado esperado aproximado:
-~99 % de coincidencia con la etiqueta real.
+~99,3 % de coincidencia con la etiqueta real.
 
 ```powershell
 streamlit run src/dashboard.py

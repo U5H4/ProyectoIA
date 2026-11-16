@@ -40,3 +40,7 @@ ProyectoIA_backup/
 # Sistema operativo
 Thumbs.db
 .DS_Store
+
+# Paquetes de entrega (demasiado grandes para GitHub)
+ProyectoIA_datasets.zip
+*.entrega.zip

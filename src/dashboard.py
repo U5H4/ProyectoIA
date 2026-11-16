@@ -149,11 +149,14 @@ with tabs[1]:
         c2.metric("Variables", flujos.shape[1])
         c3.metric("Clases", flujos["label"].nunique())
         conteo = flujos["label"].value_counts().rename_axis("label").reset_index(name="registros")
-        st.plotly_chart(
-            px.bar(conteo, x="label", y="registros", color="label",
-                   title="Distribucion de clases de riesgo"),
-            width="stretch",
+        fig_clases = px.bar(conteo, x="label", y="registros", color="label",
+                            title="Distribucion de clases de riesgo")
+        fig_clases.update_layout(
+            showlegend=False, height=420, font=dict(size=12),
+            margin=dict(l=60, r=20, t=45, b=70),
+            xaxis=dict(automargin=True), yaxis=dict(automargin=True),
         )
+        st.plotly_chart(fig_clases, width="stretch")
     else:
         falta(PROCESSED / "flujos_clean.parquet")
 
@@ -179,11 +182,14 @@ with tabs[2]:
     metricas = leer_csv(str(REPORTS / "metricas_modelos.csv"))
     if metricas is not None:
         st.dataframe(metricas, width="stretch")
-        st.plotly_chart(
-            px.bar(metricas.sort_values("f1_macro"), x="f1_macro", y="modelo",
-                   orientation="h", title="Comparacion de algoritmos (F1-macro)"),
-            width="stretch",
+        fig_f1 = px.bar(metricas.sort_values("f1_macro"), x="f1_macro", y="modelo",
+                        orientation="h", title="Comparacion de algoritmos (F1-macro)")
+        fig_f1.update_layout(
+            showlegend=False, height=380, font=dict(size=12),
+            margin=dict(l=150, r=30, t=45, b=55),
+            xaxis=dict(automargin=True, range=[0.89, 1.005]), yaxis=dict(automargin=True),
         )
+        st.plotly_chart(fig_f1, width="stretch")
     else:
         falta(REPORTS / "metricas_modelos.csv")
 
@@ -192,26 +198,47 @@ with tabs[2]:
         matriz = leer_csv(str(REPORTS / "matriz_confusion.csv"))
         if matriz is not None:
             matriz = matriz.set_index(matriz.columns[0])
-            st.plotly_chart(
-                px.imshow(matriz, text_auto=True, color_continuous_scale="Blues",
-                          title="Matriz de confusion"),
-                width="stretch",
+            matriz.index.name = "Real"
+            matriz.columns.name = "Predicho"
+            fig_matriz = px.imshow(matriz, text_auto=True, color_continuous_scale="Blues",
+                                  title="Matriz de confusion",
+                                  labels=dict(x="Predicho", y="Real", color="Flujos"))
+            fig_matriz.update_layout(
+                coloraxis_colorbar=dict(title="Flujos", thickness=12, len=0.7, x=1.02, xanchor="left", xpad=2),
+                height=560, width=780, font=dict(size=13),
+                margin=dict(l=90, r=60, t=55, b=90),
+                xaxis=dict(automargin=True), yaxis=dict(automargin=True),
             )
+            st.plotly_chart(fig_matriz, width="content")
     with col2:
         imp = leer_csv(str(REPORTS / "importancia_variables.csv"))
         if imp is not None:
-            st.plotly_chart(
-                px.bar(imp.head(15).sort_values("importancia"), x="importancia", y="variable",
-                       orientation="h", title="Variables mas importantes"),
-                width="stretch",
+            fig_imp = px.bar(imp.head(15).sort_values("importancia"), x="importancia", y="variable",
+                             orientation="h", title="Variables mas importantes")
+            fig_imp.update_layout(
+                showlegend=False, height=520, font=dict(size=11),
+                margin=dict(l=200, r=30, t=45, b=45),
+                xaxis=dict(automargin=True), yaxis=dict(automargin=True),
             )
+            st.plotly_chart(fig_imp, width="stretch")
 
-    st.subheader("Predicciones sobre el conjunto de prueba")
+    st.subheader("Aciertos por clase (test, 5.945 flujos)")
     pred = leer_parquet(str(PROCESSED / "predicciones_test.parquet"))
     if pred is not None:
-        st.dataframe(pred.head(50), width="stretch")
-        aciertos = pred["acierto"].mean() * 100
-        st.caption(f"Aciertos sobre {len(pred):,} registros: {aciertos:.2f}%")
+        tabla = (
+            pred.groupby("label_real")
+            .agg(soporte=("acierto", "size"), aciertos=("acierto", "sum"))
+            .reset_index()
+            .rename(columns={"label_real": "Clase"})
+        )
+        tabla["aciertos"] = tabla["aciertos"].astype(int)
+        _total_row = pd.DataFrame(
+            {"Clase": ["Total"], "soporte": [int(tabla["soporte"].sum())], "aciertos": [int(tabla["aciertos"].sum())]}
+        )
+        tabla = pd.concat([tabla, _total_row], ignore_index=True)
+        tabla["% aciertos"] = (tabla["aciertos"] / tabla["soporte"] * 100).round(2).astype(str) + " %"
+        tabla["soporte"] = tabla["soporte"].astype(int)
+        st.dataframe(tabla, width="content", hide_index=True)
 
     st.subheader("Prediccion en vivo (inferencia)")
     st.caption(
@@ -228,15 +255,73 @@ with tabs[2]:
                 f"Predicciones generadas con **{predictor['modelo_nombre']}** sobre "
                 f"{len(resultado):,} flujos."
             )
-            resumen = (
-                resultado["label_predicho"].value_counts().rename_axis("clase").reset_index(name="flujos")
+            etiquetadas = next(
+                (c for c in ("Label", "label", "label_raw") if c in resultado.columns), None
             )
-            st.plotly_chart(
-                px.bar(resumen, x="clase", y="flujos", color="clase",
-                       title="Distribucion de clases predichas"),
-                width="stretch",
-            )
-            st.dataframe(resultado[["label_predicho"]].head(50), width="stretch")
+            if etiquetadas is not None:
+                from config import LABEL_GROUPS
+
+                real = (
+                    resultado[etiquetadas]
+                    .astype(str)
+                    .str.replace("\ufffd", "-", regex=False)
+                    .map(LABEL_GROUPS)
+                )
+                validas = real.notna()
+                if validas.any():
+                    real = real[validas]
+                    pred_val = resultado["label_predicho"][validas]
+                    vis = pd.DataFrame(
+                        {
+                            "label_real": real,
+                            "label_predicho": pred_val,
+                            "acierto": real == pred_val,
+                        }
+                    )
+                    orden = [
+                        "BENIGN", "Bot", "BruteForce", "DDoS", "DoS",
+                        "Heartbleed", "Infiltration", "PortScan", "WebAttack",
+                    ]
+                    from sklearn.metrics import confusion_matrix
+
+                    matriz = confusion_matrix(real, pred_val, labels=orden)
+                    fig_live = px.imshow(
+                        pd.DataFrame(matriz, index=orden, columns=orden),
+                        text_auto=True,
+                        color_continuous_scale="Blues",
+                        title="Matriz de confusion del CSV cargado",
+                        labels=dict(x="Predicho", y="Real", color="Flujos"),
+                    )
+                    fig_live.update_layout(
+                        coloraxis_colorbar=dict(title="Flujos", thickness=12, len=0.7, x=1.02, xanchor="left", xpad=2),
+                        height=560, width=780, font=dict(size=13),
+                        margin=dict(l=90, r=60, t=55, b=90),
+                        xaxis=dict(automargin=True), yaxis=dict(automargin=True),
+                    )
+                    st.plotly_chart(fig_live, width="content")
+                    tabla_live = (
+                        vis.groupby("label_real")
+                        .agg(soporte=("acierto", "size"), aciertos=("acierto", "sum"))
+                        .reset_index()
+                        .rename(columns={"label_real": "Clase"})
+                    )
+                    tabla_live["aciertos"] = tabla_live["aciertos"].astype(int)
+                    _total_row = pd.DataFrame(
+                        {
+                            "Clase": ["Total"],
+                            "soporte": [int(tabla_live["soporte"].sum())],
+                            "aciertos": [int(tabla_live["aciertos"].sum())],
+                        }
+                    )
+                    tabla_live = pd.concat([tabla_live, _total_row], ignore_index=True)
+                    tabla_live["% aciertos"] = (tabla_live["aciertos"] / tabla_live["soporte"] * 100).round(2).astype(str) + " %"
+                    tabla_live["soporte"] = tabla_live["soporte"].astype(int)
+                    st.dataframe(tabla_live, width="content", hide_index=True)
+                else:
+                    st.info("La etiqueta del CSV no coincide con las 9 clases del ETL; se omite la comparación.")
+                    st.dataframe(resultado[["label_predicho"]].head(50), width="stretch")
+            else:
+                st.dataframe(resultado[["label_predicho"]].head(50), width="stretch")
         except FileNotFoundError:
             st.warning("Falta `models/predictor.joblib`. Ejecuta `python src/run_all.py --sin-descargar --solo etl ml`.")
         except KeyError as exc:
@@ -255,19 +340,25 @@ with tabs[3]:
     iocs = leer_csv(str(REPORTS / "pnl_iocs.csv"))
 
     if dist is not None:
-        st.plotly_chart(
-            px.bar(dist, x="sentimiento", y="documentos", color="sentimiento",
-                   title="Documentos por sentimiento (VADER)"),
-            width="stretch",
+        fig_sent = px.bar(dist, x="sentimiento", y="documentos", color="sentimiento",
+                          title="Documentos por sentimiento (VADER)")
+        fig_sent.update_layout(
+            showlegend=False, height=420, font=dict(size=12),
+            margin=dict(l=60, r=20, t=45, b=50),
+            xaxis=dict(automargin=True), yaxis=dict(automargin=True),
         )
+        st.plotly_chart(fig_sent, width="stretch")
     col1, col2 = st.columns(2)
     with col1:
         if terminos is not None:
-            st.plotly_chart(
-                px.bar(terminos.head(15).sort_values("relevancia"), x="relevancia", y="termino",
-                       orientation="h", title="Terminos mas relevantes (TF-IDF)"),
-                width="stretch",
+            fig_term = px.bar(terminos.head(15).sort_values("relevancia"), x="relevancia", y="termino",
+                              orientation="h", title="Terminos mas relevantes (TF-IDF)")
+            fig_term.update_layout(
+                showlegend=False, height=480, font=dict(size=11),
+                margin=dict(l=170, r=20, t=45, b=50),
+                xaxis=dict(automargin=True), yaxis=dict(automargin=True),
             )
+            st.plotly_chart(fig_term, width="stretch")
     with col2:
         if iocs is not None:
             st.markdown("**Entidades (IOCs) mas frecuentes**")

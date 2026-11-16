@@ -566,7 +566,7 @@ src/ml.py          src/pnl.py
 |---|---|
 | Resumen | registros analizados, mínimos cumplidos, CV F1-macro del ganador |
 | Datos (ETL) | tabla de transformaciones (antes/después/filas), mínimos verde |
-| ML | comparación de 6 modelos, matriz de confusión, importancia de variables, uploader de flujos CSV crudo con predicción 1- clic + score |
+| ML | comparación de 6 modelos, matriz de confusión del holdout (con acierto global debajo), importancia de variables, tabla de aciertos por clase, uploader de flujos CSV crudo con predicción en vivo; si el CSV trae etiqueta cruda (`Label`) muestra la matriz de confusión del CSV cargado, el acierto global y la tabla de aciertos por clase sobre ese CSV |
 | PNL | top términos, sentimiento, entidades/IOCs, KPIs, resúmenes |
 | Blockchain | validez en vivo de la cadena (`es_valida()`), estado por artefacto re-hasheado (OK/MODIFICADO/FALTANTE), uploader SHA-256 de cualquier archivo |
 
@@ -805,7 +805,7 @@ Cada paso queda línea-a-línea en `data/reports/calidad_transformaciones.csv`. 
 
 **`blockchain.py`** — cadena propia: bloque 0 génesis, bloques con `indice`, `timestamp` UTC, `datos` (metadatos del artefacto), `hash_previo`, `hash=SHA256(bloque)`; `hash_archivo()` re-hashea artefactos; `es_valida()` recalcula toda la cadena; `--solo-verificar` re-hashea los 7 artefactos contra la cadena persistida sin reconstruir; `ejecutar()` archiva la cadena previa (`cadena_<UTC>.backup.json`) y, si la previa es inválida o falta algo, archiva y aborta (salvo `--reconstruir-forzadamente`).
 
-**`dashboard.py`** — Streamlit, 5 pestañas (Resumen/Datos/ML/PNL/Blockchain). Upload de CSV crudo ⇒ `predecir()` ⇒ tipo de ataque + score; la pestaña Blockchain recalcula `es_valida()` y re-hashea los artefactos **en vivo**; AppTest (`tests/test_dashboard.py`) garantiza que renderiza sin excepciones. **Prueba rápida:** subir `examples/flujos_ejemplo.csv` (200 flujos crudos: 100 BENIGN + 100 BruteForce, columna `Label` sólo de referencia y es ignorada por el modelo) desde la pestaña ML; ~99 % coincide con la etiqueta.
+**`dashboard.py`** — Streamlit, 5 pestañas (Resumen/Datos/ML/PNL/Blockchain). Upload de CSV crudo ⇒ `predecir()` ⇒ tipo de ataque + score; la pestaña Blockchain recalcula `es_valida()` y re-hashea los artefactos **en vivo**; AppTest (`tests/test_dashboard.py`) garantiza que renderiza sin excepciones. **Prueba rápida:** subir `examples/flujos_ejemplo.csv` (1087 flujos crudos con reparto variado — 232 BENIGN, 161 BruteForce, 186 DoS, 125 Web Attack, 131 DDoS, 118 PortScan, 87 Bot, 36 Infiltration, 11 Heartbleed; columna `Label` sólo de referencia, la ignora el modelo) desde la pestaña ML; ~99,3 % coincide con la etiqueta.
 
 **`indice.py`** — genera `indice.html`: una sola página, 4 figuras Plotly inline (sin red; `plotly.min.js` local), encabezados 1–4, colores variados, sin CDNs. Se invoca al final de `integrar.py` (fallo ⇒ warning, no detiene el pipeline).
 
