@@ -144,10 +144,16 @@ with tabs[1]:
     st.subheader("Dataset procesado")
     flujos = leer_parquet(str(PROCESSED / "flujos_clean.parquet"))
     if flujos is not None:
+        etiqueta_cols = [c for c in flujos.columns if c.lower() in ("label", "label_raw")]
+        n_etiquetas = len(etiqueta_cols)
         c1, c2, c3 = st.columns(3)
         c1.metric("Registros", f"{len(flujos):,}")
-        c2.metric("Variables", flujos.shape[1])
+        c2.metric("Columnas", flujos.shape[1])
         c3.metric("Clases", flujos["label"].nunique())
+        st.caption(
+            f"De las {flujos.shape[1]} columnas, {flujos.shape[1] - n_etiquetas} son predictoras del modelo "
+            f"y {n_etiquetas} son de etiqueta ({', '.join(etiqueta_cols)}; no se usan como variables)"
+        )
         conteo = flujos["label"].value_counts().rename_axis("label").reset_index(name="registros")
         fig_clases = px.bar(conteo, x="label", y="registros", color="label",
                             title="Distribucion de clases de riesgo")
